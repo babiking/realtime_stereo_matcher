@@ -7,14 +7,14 @@ def get_random_sample_data(n=1, c=64, h=480, w=640):
     return torch.randn(size=(n, c, h, w), dtype=torch.float32)
 
 
-def print_model_capacity(module, inputs=None):
+def get_model_capacity(module, inputs=None, verbose=True):
     if inputs is None:
         inputs = (get_random_sample_data(),)
 
     n_macs, n_params = profile(module, inputs=inputs)
 
-    print(f"module={module.__class__.__name__}.")
-    print("{:<30}  {:<8}G".format("number_of_operations:", np.round(n_macs / 1e9), 5))
-    print(
-        "{:<30}  {:<8}M".format("number_of_parameters: ", np.round(n_params / 1e6, 5))
-    )
+    if verbose:
+        print(f"module={module.__class__.__name__}.")
+        print("{:<30}  {:<8}G".format("#operations:", np.round(n_macs / 1e9), 5))
+        print("{:<30}  {:<8}M".format("#parameters: ", np.round(n_params / 1e6, 5)))
+    return n_macs, n_params
