@@ -14,7 +14,7 @@ def get_model_capacity(module, inputs=None, verbose=True):
     n_macs, n_params = profile(module, inputs=inputs)
 
     if verbose:
-        print(f"module={module.__class__.__name__}.")
+        print(f"module={module}.")
         print("{:<30}  {:<8}G".format("#operations:", np.round(n_macs / 1e9), 5))
         print("{:<30}  {:<8}M".format("#parameters: ", np.round(n_params / 1e6, 5)))
     return n_macs, n_params
