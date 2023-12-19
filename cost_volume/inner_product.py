@@ -13,15 +13,23 @@ class TorchInnerProductCost(nn.Module):
         Args:
             [1] left, (N, C, H, W), left image encoded features
                 - N = batch size
-                - C = number of feature channels
+                - C = number of input feature channels
                 - H = image height
                 - W = image width
             [2] right, (N, C, H, W), right image encoded features
 
         Return:
-            [1] volume, (N, H, W, W), inner-product based cost volume
+            [1] volume, (N * H * W, 1, 1, W), i.e. (N * H * W, C', 1, D'), inner-product based cost volume
+                - C', number of output feature channels
+                - D', maximum disparity value, i.e. image width
         """
+        n, c, h, w = left.shape
+
+        # volume: (N, H, W, W)
         volume = torch.einsum("aijk,aijh->ajkh", left, right)
+        # volume: (N * H * W, 1, 1, W)
+        volume = volume.view([n * h * w, 1, 1, w])
+
         volume = volume.contiguous()
         return volume
 
