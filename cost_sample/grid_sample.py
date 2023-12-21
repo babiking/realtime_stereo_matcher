@@ -17,12 +17,13 @@ class TorchGridSampleSearch(nn.Module):
         torch naive grid sample SEARCH of cost volume based on flow map
 
         Args:
-            [1] cost_volume, (N, 1, H, W, D)
+            [1] cost_volume, (N, 1, H * W, D)
             [2] flow_map, (N, H, W, 1), disparity flow map, s.t. -1.0 < flow_map < 1.0
         Return:
             [1] search_cost_volume, (N, 2 * search_range + 1, H, W)
         """
-        n, c, h, w, d = cost_volume.shape
+        n, c, _, d = cost_volume.shape
+        _, h, w, _ = flow_map.shape
 
         assert c == 1, f"TorchGridSampleSearch input feature dimension != 1 ({c})."
 
@@ -64,12 +65,13 @@ class TorchGridSampleParse(nn.Module):
         torch naive grid sample PARSE of cost volume based on flow map
 
         Args:
-            [1] cost_volume, (N, C, H, W, D)
+            [1] cost_volume, (N, C, H * W, D)
             [2] flow_map, (N, H, W, 1), disparity flow map, s.t. -1.0 < flow_map < 1.0
         Return:
             [1] sample_cost_volume, (N, C, H, W)
         """
-        n, c, h, w, d = cost_volume.shape
+        n, c, _, d = cost_volume.shape
+        _, h, w, _ = flow_map.shape
 
         flow_xs = flow_map.view([n * h * w, 1, 1, 1])
         flow_ys = torch.zeros_like(flow_xs)
@@ -77,7 +79,7 @@ class TorchGridSampleParse(nn.Module):
         # flow_grids: (N * H * W, 1, 1, 2)
         flow_grids = torch.concatenate([flow_xs, flow_ys], dim=-1)
 
-        all_cost_volume = cost_volume.view([n * h * w, c, 1, d])
+        all_cost_volume = cost_volume.permute([0, 2, 1, 3]).view([n * h * w, c, 1, d])
 
         # search_cost_volume: (N * H * W, C, 1, 1)
         parse_cost_volume = F.grid_sample(
@@ -103,7 +105,7 @@ class MyGridSampleParse(nn.Module):
         customize grid sample PARSE of cost volume based on flow map
 
         Args:
-            [1] cost_volume, (N, C, H, W, D)
+            [1] cost_volume, (N, C, H * W, D)
             [2] flow_map, (N, H, W, 1), disparity flow map, s.t. -1.0 < flow_map < 1.0
         Return:
             [1] sample_cost_volume, (N, C, H, W)

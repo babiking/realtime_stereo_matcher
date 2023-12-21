@@ -10,7 +10,7 @@ torch.manual_seed(23)
 
 
 def export_cost_sample_to_onnx(model, onnx_file, n=1, c=1, h=32, w=64):
-    cost_volume = torch.rand((n, c, h, w, w), dtype=torch.float32)
+    cost_volume = torch.rand((n, c, h * w, w), dtype=torch.float32)
     flow_map = 2.0 * torch.rand((n, h, w, 1), dtype=torch.float32) - 1.0
 
     os.makedirs(os.path.dirname(onnx_file), exist_ok=True)
@@ -54,7 +54,7 @@ def test_cost_sample_model_capacity():
     d = 160
 
     search_inputs = (
-        torch.rand(size=(n, 1, h, w, d), dtype=torch.float32),
+        torch.rand(size=(n, 1, h * w, d), dtype=torch.float32),
         2.0 * torch.rand(size=(n, h, w, 1), dtype=torch.float32) - 1.0,
     )
     get_model_capacity(
@@ -62,7 +62,7 @@ def test_cost_sample_model_capacity():
     )
 
     parse_inputs = (
-        torch.rand(size=(n, c, h, w, d), dtype=torch.float32),
+        torch.rand(size=(n, c, h * w, d), dtype=torch.float32),
         2.0 * torch.rand(size=(n, h, w, 1), dtype=torch.float32) - 1.0,
     )
     get_model_capacity(TorchGridSampleParse(), inputs=parse_inputs, verbose=True)
