@@ -20,7 +20,7 @@ class MySoftArgminFlowHead(nn.Module):
         """
         n, h, w, d = cost_volume.shape
 
-        disparities = torch.linspace(0, d, d, dtype=torch.float32)
+        disparities = torch.linspace(0, d, d, dtype=torch.float32, device=cost_volume.device)
         disparities = disparities.view([1, 1, 1, d])
 
         flow_map = torch.sum(

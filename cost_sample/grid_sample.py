@@ -8,9 +8,6 @@ class TorchGridSampleSearch(nn.Module):
         super().__init__(*args, **kwargs)
 
         self.search_range = search_range
-        self.search_linespace = torch.linspace(
-            -search_range, search_range, 2 * search_range + 1, dtype=torch.float32
-        )
 
     def forward(self, cost_volume, flow_map):
         """
@@ -22,6 +19,14 @@ class TorchGridSampleSearch(nn.Module):
         Return:
             [1] search_cost_volume, (N, 2 * search_range + 1, H, W)
         """
+        self.search_linespace = torch.linspace(
+            -self.search_range,
+            self.search_range,
+            2 * self.search_range + 1,
+            dtype=torch.float32,
+            device=cost_volume.device,
+        )
+
         n, c, _, d = cost_volume.shape
         _, h, w, _ = flow_map.shape
 
