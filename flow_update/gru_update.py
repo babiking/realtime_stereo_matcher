@@ -33,7 +33,7 @@ class MyStereoEdgeHead(nn.Module):
     def __init__(self, in_dim, hidden_dims, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
-        self.conv2d_layers = []
+        self.conv2d_layers = nn.ModuleList([])
 
         for i in range(len(hidden_dims) + 1):
             if i == 0:
@@ -188,40 +188,3 @@ class MyGRUFlowMapUpdata(nn.Module):
 
         delta_flow_map = self.out_1x1_layer(hidden_state)
         return delta_flow_map
-
-
-class MyUpsampleEdgeMapUpdate(nn.Module):
-    def __init__(self, in_dims, hidden_dim, is_training, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-
-        self.in_dims = in_dims
-        self.hidden_dim = hidden_dim
-        self.is_training = is_training
-
-        self.in_1x1_layers = []
-        for in_dim in in_dims:
-            self.in_1x1_layers.append(nn.Conv2d(in_dim, hidden_dim, 1))
-
-        self.edge_head = MyStereoEdgeHead(hidden_dim, hidden_dims=[hidden_dim] * 3)
-
-    def forward(self, encode_pyramid, flow_map):
-        flow_map = F.interpolate(
-            flow_map, scale_factor=[2, 2], mode="bilinear", align_corners=True
-        )
-
-        flow_pyramid = []
-        for i in np.flip(range(len(encode_pyramid))):
-            l_fmap, r_fmap = encode_pyramid[i]
-            l_fmap_new = self.in_1x1_layers[i](l_fmap)
-            r_fmap_new = self.in_1x1_layers[i](r_fmap)
-
-            edge_map = self.edge_head(l_fmap_new, r_fmap_new)
-
-            flow_map += edge_map
-
-            if self.is_training:
-                flow_pyramid.append(flow_map)
-            else:
-                if i == 0:
-                    flow_pyramid.append(flow_map)
-        return flow_pyramid
