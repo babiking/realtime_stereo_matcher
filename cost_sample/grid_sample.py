@@ -33,7 +33,7 @@ class TorchGridSampleSearch(nn.Module):
         flow_ys = torch.zeros_like(flow_xs)
 
         # flow_grids: (N * H * W, 2 * search_range + 1, 1, 2)
-        flow_grids = torch.concatenate([flow_xs, flow_ys], dim=-1)
+        flow_grids = torch.concatenate([2.0 * flow_xs / d - 1.0, flow_ys], dim=-1)
 
         all_cost_volume = cost_volume.view([n * h * w, 1, 1, d])
 
@@ -77,7 +77,7 @@ class TorchGridSampleParse(nn.Module):
         flow_ys = torch.zeros_like(flow_xs)
 
         # flow_grids: (N * H * W, 1, 1, 2)
-        flow_grids = torch.concatenate([flow_xs, flow_ys], dim=-1)
+        flow_grids = torch.concatenate([2.0 * flow_xs / d - 1.0, flow_ys], dim=-1)
 
         all_cost_volume = cost_volume.permute([0, 2, 1, 3]).view([n * h * w, c, 1, d])
 
