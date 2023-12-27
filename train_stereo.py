@@ -65,17 +65,28 @@ def sequence_loss(flow_preds, flow_gt, valid, loss_gamma=0.9, max_flow=700):
             not torch.isnan(flow_preds[i]).any()
             and not torch.isinf(flow_preds[i]).any()
         )
+
+        if flow_preds[i].shape != flow_gt.shape:
+            n, _, h, w = flow_preds[i].shape
+
+            i_flow_gt = F.interpolate(flow_gt, [h, w], mode="bilinear", align_corners=True)
+            i_valid = F.interpolate(valid.float(), [h, w], mode="bilinear", align_corners=True)
+            i_valid = (i_valid >= 0.5)
+        else:
+            i_flow_gt = flow_gt
+            i_valid = valid
+
         # We adjust the loss_gamma so it is consistent for any number of RAFT-Stereo iterations
         adjusted_loss_gamma = loss_gamma ** (15 / (n_predictions))
         i_weight = adjusted_loss_gamma ** (n_predictions - i)
-        i_loss = (flow_preds[i] - flow_gt).abs()
-        assert i_loss.shape == valid.shape, [
+        i_loss = (flow_preds[i] - i_flow_gt).abs()
+        assert i_loss.shape == i_valid.shape, [
             i_loss.shape,
-            valid.shape,
-            flow_gt.shape,
+            i_valid.shape,
+            i_flow_gt.shape,
             flow_preds[i].shape,
         ]
-        flow_loss += i_weight * i_loss[valid.bool()].mean()
+        flow_loss += i_weight * i_loss[i_valid.bool()].mean()
 
     epe = torch.sum((flow_preds[-1] - flow_gt) ** 2, dim=1).sqrt()
     epe = epe.view(-1)[valid.view(-1)]
@@ -179,10 +190,12 @@ class Logger:
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
+
 def freeze_bn(model):
     for m in model.modules():
         if isinstance(m, nn.BatchNorm2d):
             m.eval()
+
 
 def initialize(model):
     for m in model.modules():
@@ -228,7 +241,7 @@ def train(exp_config):
             flow_predictions = model(image1, image2)
             assert model.training
 
-            loss, metrics = sequence_loss([flow_predictions[-1]], flow, valid)
+            loss, metrics = sequence_loss(flow_predictions, flow, valid)
             logger.writer.add_scalar("live_loss", loss.item(), global_batch_num)
             logger.writer.add_scalar(
                 f"learning_rate", optimizer.param_groups[0]["lr"], global_batch_num
