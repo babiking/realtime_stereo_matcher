@@ -27,6 +27,7 @@
         "down_factor": 2, 
         "cost_factor": 3, 
         "cost_radius": 4,
+        "max_disparity": 128,
         "mixed_precision": true
     },
     "data": {
