@@ -11,6 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 from model.mobile_raft_stereo import MobileRaftStereoModel
 import dataset.stereo_datasets as datasets
 
@@ -65,8 +66,8 @@ def sequence_loss(flow_preds, flow_gt, valid, loss_gamma=0.9, max_flow=700):
             and not torch.isinf(flow_preds[i]).any()
         )
         # We adjust the loss_gamma so it is consistent for any number of RAFT-Stereo iterations
-        adjusted_loss_gamma = loss_gamma ** (15 / (n_predictions - 1))
-        i_weight = adjusted_loss_gamma ** (n_predictions - i - 1)
+        adjusted_loss_gamma = loss_gamma ** (15 / (n_predictions))
+        i_weight = adjusted_loss_gamma ** (n_predictions - i)
         i_loss = (flow_preds[i] - flow_gt).abs()
         assert i_loss.shape == valid.shape, [
             i_loss.shape,
@@ -227,7 +228,7 @@ def train(exp_config):
             flow_predictions = model(image1, image2)
             assert model.training
 
-            loss, metrics = sequence_loss(flow_predictions, flow, valid)
+            loss, metrics = sequence_loss([flow_predictions[-1]], flow, valid)
             logger.writer.add_scalar("live_loss", loss.item(), global_batch_num)
             logger.writer.add_scalar(
                 f"learning_rate", optimizer.param_groups[0]["lr"], global_batch_num

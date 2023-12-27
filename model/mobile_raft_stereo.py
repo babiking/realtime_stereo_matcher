@@ -140,7 +140,7 @@ class MobileRaftStereoModel(nn.Module):
         for j in np.flip(range(self.down_factor - 1)):
             flow_map = F.interpolate(
                 flow_map, scale_factor=[2, 2], mode="bilinear", align_corners=True
-            )
+            ) * 2.0
 
             l_fmap, r_fmap = torch.split(
                 encode_pyramid[j],
