@@ -1,5 +1,5 @@
 {
-    "name": "BASE_FOLD_1_9_UPDATE_1",
+    "name": "BASE",
     "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/BASE",
     "train": {
         "batch_size": 6,
