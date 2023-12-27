@@ -5,28 +5,40 @@ import numpy as np
 
 
 class MySoftArgminFlowHead(nn.Module):
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, max_disparity, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self.max_disparity = max_disparity
 
     def forward(self, cost_volume):
         """
         customize soft argmin flow map generation head.
 
         Args:
-            [1] cost_volume, (N, H, W, D), cost volume
+            [1] cost_volume, (N, D, H, W), cost volume
 
         Return:
-            [1] flow_map, (N, H, W, D), flow map by soft-argmin along disparity dimension
+            [1] flow_map, (N, D, H, W), flow map by soft-argmin along disparity dimension
         """
-        n, h, w, d = cost_volume.shape
-
-        disparities = torch.linspace(0, d, d, dtype=torch.float32, device=cost_volume.device)
-        disparities = disparities.view([1, 1, 1, d])
+        disparities = torch.arange(
+            0, self.max_disparity, dtype=cost_volume.dtype, device=cost_volume.device
+        )
+        disparities = disparities.view([1, self.max_disparity, 1, 1])
 
         flow_map = torch.sum(
-            torch.softmax(cost_volume, dim=-1) * disparities, dim=-1, keepdim=True
+            torch.softmax(cost_volume, dim=1) * disparities, dim=1, keepdim=True
         )
         return flow_map
+
+
+class MyConv2dCostHead(nn.Module):
+    def __init__(self, in_dim, hidden_dim, out_dim, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.conv1 = nn.Conv2d(in_dim, hidden_dim, 3, padding=1)
+        self.conv2 = nn.Conv2d(hidden_dim, out_dim, 3, padding=1)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, cost_volume):
+        return self.conv2(self.relu(self.conv1(cost_volume)))
 
 
 class MyStereoEdgeHead(nn.Module):
