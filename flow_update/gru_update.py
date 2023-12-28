@@ -30,17 +30,6 @@ class MySoftArgminFlowHead(nn.Module):
         return flow_map
 
 
-class MyConv2dCostHead(nn.Module):
-    def __init__(self, in_dim, hidden_dim, out_dim, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.conv1 = nn.Conv2d(in_dim, hidden_dim, 3, padding=1)
-        self.conv2 = nn.Conv2d(hidden_dim, out_dim, 3, padding=1)
-        self.relu = nn.ReLU(inplace=True)
-
-    def forward(self, cost_volume):
-        return self.conv2(self.relu(self.conv1(cost_volume)))
-
-
 class MyStereoEdgeHead(nn.Module):
     def __init__(self, in_dim, hidden_dims, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
