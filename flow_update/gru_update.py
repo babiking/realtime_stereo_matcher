@@ -53,22 +53,27 @@ class MyStereoEdgeHead(nn.Module):
                 out_channels = hidden_dims[i]
                 dilation = 2
 
-        self.conv2d_layers.append(
-            nn.Sequential(
-                nn.Conv2d(
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                    kernel_size=kernel_size,
-                    stride=1,
-                    padding="same",
-                    dilation=dilation,
-                    groups=1,
-                    bias=False,
-                ),
-                nn.BatchNorm2d(out_channels),
-                nn.ReLU(inplace=True),
+            conv2d_layeri = nn.Conv2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=kernel_size,
+                stride=1,
+                padding="same",
+                dilation=dilation,
+                groups=1,
+                bias=False,
             )
-        )
+
+            if i != len(hidden_dims):
+                self.conv2d_layers.append(
+                    nn.Sequential(
+                        conv2d_layeri,
+                        nn.BatchNorm2d(out_channels),
+                        nn.ReLU(inplace=True),
+                    )
+                )
+            else:
+                self.conv2d_layers.append(conv2d_layeri)
 
     def forward(self, left, right):
         """
@@ -182,7 +187,7 @@ class MyGRUFlowMapUpdata(nn.Module):
                 padding=0,
                 stride=1,
                 bias=False,
-            )
+            ),
         )
 
         self.gru_cell = MyGRUCell(in_dim, hidden_dim, kernel_size=3)
@@ -212,9 +217,9 @@ class MyGRUFlowMapUpdata(nn.Module):
             if i > 0:
                 cost_volume = self.downsample(cost_volume)
             cost_pyramid.append(cost_volume)
-        
+
         for j in np.flip(range(self.num_of_updates)):
             hidden_state = self.gru_cell(cost_pyramid[j], hidden_state)
-            
+
         delta_flow_map = self.out_1x1_layer(hidden_state)
         return delta_flow_map

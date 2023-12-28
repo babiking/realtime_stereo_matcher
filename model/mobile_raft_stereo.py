@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 from feature_extractor.residual_block import MobileV2Residual, ResidualBottleneckBlock
 from cost_volume.inner_product import TorchInnerProductCost
 from flow_update.gru_update import (
@@ -122,7 +123,7 @@ class MobileRaftStereoModel(nn.Module):
             in_dim=hidden_dim, hidden_dims=[hidden_dim] * 3
         )
 
-    def forward(self, left, right):
+    def forward(self, left, right, is_training=True):
         encode_pyramid = self.encoder(left, right)
 
         l_fmap, r_fmap = torch.split(
@@ -133,32 +134,26 @@ class MobileRaftStereoModel(nn.Module):
         cost_volume = self.cost_volume_builder(l_fmap, r_fmap)
         init_flow_map = self.flow_map_header(cost_volume)
         delta_flow_map = self.flow_map_update(cost_volume)
-
         flow_map = init_flow_map + delta_flow_map
-        flow_map = F.interpolate(
-            flow_map, scale_factor=self.down_scale, mode="bilinear", align_corners=True
-        )
-        flow_map *= self.down_scale
 
-        # flow_pyramid = [flow_map]
-        # for j in np.flip(range(self.down_factor - 1)):
-        #     flow_map = F.interpolate(
-        #         flow_map, scale_factor=[2, 2], mode="bilinear", align_corners=True
-        #     ) * 2.0
+        flow_pyramid = []
+        for j in np.flip(range(self.down_factor)):
+            if j > self.down_factor - 1:
+                flow_map = F.interpolate(
+                    flow_map, scale_factor=[2, 2], mode="bilinear", align_corners=True
+                ) * 2.0
 
-        #     l_fmap, r_fmap = torch.split(
-        #         encode_pyramid[j],
-        #         split_size_or_sections=encode_pyramid[j].shape[0] // 2,
-        #         dim=0,
-        #     )
-        #     r_warp_fmap = warp_feature_volume_by_flow(r_fmap, flow_map)
+            l_fmap, r_fmap = torch.split(
+                encode_pyramid[j],
+                split_size_or_sections=encode_pyramid[j].shape[0] // 2,
+                dim=0,
+            )
+            r_warp_fmap = warp_feature_volume_by_flow(r_fmap, flow_map)
 
-        #     edge_map = self.edge_map_header(l_fmap, r_warp_fmap)
+            edge_map = self.edge_map_header(l_fmap, r_warp_fmap)
 
-        #     flow_map += edge_map
+            flow_map += edge_map
 
-        #     flow_pyramid.append(flow_map)
-
-        # return flow_pyramid
-
-        return [flow_map * -1.0]
+            if is_training or (not is_training and j == self.down_factor - 1):
+                flow_pyramid.append(flow_map)
+        return [-1.0 * flow_map for flow_map in flow_pyramid]
