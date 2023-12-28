@@ -14,26 +14,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from model.mobile_raft_stereo import MobileRaftStereoModel
 import dataset.stereo_datasets as datasets
-
-try:
-    from torch.cuda.amp import GradScaler
-except:
-    # dummy GradScaler for PyTorch < 1.6
-    class GradScaler:
-        def __init__(self):
-            pass
-
-        def scale(self, loss):
-            return loss
-
-        def unscale_(self, optimizer):
-            pass
-
-        def step(self, optimizer):
-            optimizer.step()
-
-        def update(self):
-            pass
+from torch.cuda.amp import GradScaler
 
 
 import gflags
@@ -45,7 +26,7 @@ gflags.DEFINE_string(
 )
 
 
-def sequence_loss(flow_preds, flow_gt, valid, loss_gamma=0.9, max_flow=700):
+def sequence_loss(flow_preds, flow_gt, valid, loss_gamma=0.99, max_flow=700):
     """Loss function defined over sequence of flow predictions"""
 
     n_predictions = len(flow_preds)
@@ -69,16 +50,20 @@ def sequence_loss(flow_preds, flow_gt, valid, loss_gamma=0.9, max_flow=700):
         if flow_preds[i].shape != flow_gt.shape:
             n, _, h, w = flow_preds[i].shape
 
-            i_flow_gt = F.interpolate(flow_gt, [h, w], mode="bilinear", align_corners=True)
-            i_valid = F.interpolate(valid.float(), [h, w], mode="bilinear", align_corners=True)
-            i_valid = (i_valid >= 0.5)
+            i_flow_gt = F.interpolate(
+                flow_gt, [h, w], mode="bilinear", align_corners=True
+            )
+            i_valid = F.interpolate(
+                valid.float(), [h, w], mode="bilinear", align_corners=True
+            )
+            i_valid = i_valid >= 0.5
         else:
             i_flow_gt = flow_gt
             i_valid = valid
 
         # We adjust the loss_gamma so it is consistent for any number of RAFT-Stereo iterations
-        adjusted_loss_gamma = loss_gamma ** (15 / (n_predictions))
-        i_weight = adjusted_loss_gamma ** (n_predictions - i)
+        adjusted_loss_gamma = loss_gamma ** (15 / (n_predictions - 1))
+        i_weight = adjusted_loss_gamma ** (n_predictions - 1 - i)
         i_loss = (flow_preds[i] - i_flow_gt).abs()
         assert i_loss.shape == i_valid.shape, [
             i_loss.shape,
@@ -136,14 +121,15 @@ class Logger:
         )
 
     def _print_training_status(self):
-        metrics_data = [
-            self.running_loss[k] / Logger.SUM_FREQ
-            for k in sorted(self.running_loss.keys())
-        ]
         training_str = "[{:6d}, {:10.7f}] ".format(
             self.total_steps + 1, self.scheduler.get_last_lr()[0]
         )
-        metrics_str = ("{:10.4f}, " * len(metrics_data)).format(*metrics_data)
+        metrics_str = ", ".join(
+            [
+                f"{k}:{self.running_loss[k] / Logger.SUM_FREQ:.4f}"
+                for k in self.running_loss.keys()
+            ]
+        )
 
         # print the training status
         logging.info(
