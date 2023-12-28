@@ -17,7 +17,7 @@ def test_cost_volume_model_capacity():
     )
 
     get_model_capacity(
-        module=TorchInnerProductCost(),
+        module=TorchInnerProductCost(max_disparity=128),
         inputs=(left, right),
         verbose=True,
     )
@@ -42,7 +42,7 @@ def test_cost_volume_onnx():
     )
 
     export_stereo_model_to_onnx(
-        model=TorchInnerProductCost(),
+        model=TorchInnerProductCost(max_disparity=16),
         onnx_file="onnx/product_cost.onnx",
     )
 
