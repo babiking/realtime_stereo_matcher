@@ -216,5 +216,5 @@ class MyGRUFlowMapUpdata(nn.Module):
         for j in np.flip(range(self.num_of_updates)):
             hidden_state = self.gru_cell(cost_pyramid[j], hidden_state)
             
-        delta_flow_map = self.out_1x1_layer(hidden_state) * float(self.in_dim)
+        delta_flow_map = self.out_1x1_layer(hidden_state)
         return delta_flow_map
