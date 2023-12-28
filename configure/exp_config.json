@@ -1,6 +1,6 @@
 {
-    "name": "BASE_REALTIME",
-    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/BASE_REALTIME",
+    "name": "BASE_FLOW_UPDATE",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/BASE_FLOW_UPDATE",
     "train": {
         "batch_size": 6,
         "restore_checkpoint": "",
