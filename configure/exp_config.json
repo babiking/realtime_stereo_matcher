@@ -2,7 +2,7 @@
     "name": "BASE_FLOW_UPDATE",
     "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/BASE_FLOW_UPDATE",
     "train": {
-        "batch_size": 6,
+        "batch_size": 8,
         "restore_checkpoint": "",
         "save_checkpoint_frequency": 10000,
         "datasets": [
@@ -12,7 +12,7 @@
             "sceneflow/driving",
             "kitti"
         ],
-        "learn_rate": 0.0002,
+        "learn_rate": 0.002,
         "num_of_steps": 100000,
         "weight_decay": 0.00001
     },
