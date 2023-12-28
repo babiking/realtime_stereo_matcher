@@ -62,8 +62,8 @@ def sequence_loss(flow_preds, flow_gt, valid, loss_gamma=0.99, max_flow=700):
             i_valid = valid
 
         # We adjust the loss_gamma so it is consistent for any number of RAFT-Stereo iterations
-        adjusted_loss_gamma = loss_gamma ** (15 / (n_predictions - 1))
-        i_weight = adjusted_loss_gamma ** (n_predictions - 1 - i)
+        adjusted_loss_gamma = loss_gamma ** (15 / max(n_predictions - 1, 3))
+        i_weight = adjusted_loss_gamma ** max(n_predictions - 1 - i, 1)
         i_loss = (flow_preds[i] - i_flow_gt).abs()
         assert i_loss.shape == i_valid.shape, [
             i_loss.shape,
@@ -76,11 +76,16 @@ def sequence_loss(flow_preds, flow_gt, valid, loss_gamma=0.99, max_flow=700):
     epe = torch.sum((flow_preds[-1] - flow_gt) ** 2, dim=1).sqrt()
     epe = epe.view(-1)[valid.view(-1)]
 
+    flow_min = torch.min(flow_preds[-1][0])
+    flow_max = torch.max(flow_preds[-1][0])
+
     metrics = {
         "epe": epe.mean().item(),
         "1px": (epe < 1).float().mean().item(),
         "3px": (epe < 3).float().mean().item(),
         "5px": (epe < 5).float().mean().item(),
+        "min": flow_min.float().item(),
+        "max": flow_max.float().item(),
     }
 
     return flow_loss, metrics

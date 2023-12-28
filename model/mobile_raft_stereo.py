@@ -1,10 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from feature_extractor.residual_block import ResidualBottleneckBlock
+from feature_extractor.residual_block import MobileV2Residual, ResidualBottleneckBlock
 from cost_volume.inner_product import TorchInnerProductCost
-from cost_sample.grid_sample import TorchGridSampleSearch
 from flow_update.gru_update import (
     MySoftArgminFlowHead,
     MyGRUFlowMapUpdata,
@@ -12,8 +10,8 @@ from flow_update.gru_update import (
 )
 
 
-class ResidualBottleneckEncoder(nn.Module):
-    def __init__(self, in_dim, hidden_dims, *args, **kwargs) -> None:
+class ImageFeatureEncoder(nn.Module):
+    def __init__(self, in_dim, hidden_dims, block="mobilev2", *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
         self.in_dim = in_dim
@@ -31,12 +29,21 @@ class ResidualBottleneckEncoder(nn.Module):
         self.layers.append(layer0)
 
         for i in range(1, len(hidden_dims)):
-            layeri = ResidualBottleneckBlock(
-                in_dim=hidden_dims[i - 1],
-                out_dim=hidden_dims[i],
-                norm_fn="group",
-                stride=2,
-            )
+            if block == "mobilev2":
+                layeri = MobileV2Residual(
+                    in_dim=hidden_dims[i - 1],
+                    out_dim=hidden_dims[i],
+                    stride=2,
+                    expanse_ratio=1,
+                    dilation=2,
+                )
+            elif block == "bottleneck":
+                layeri = ResidualBottleneckBlock(
+                    in_dim=hidden_dims[i - 1],
+                    out_dim=hidden_dims[i],
+                    norm_fn="group",
+                    stride=2,
+                )
             self.layers.append(layeri)
 
     def forward(self, left, right):
@@ -74,9 +81,11 @@ class MobileRaftStereoModel(nn.Module):
     def __init__(
         self,
         hidden_dim,
+        encode_block,
         down_factor,
         cost_factor,
         cost_radius,
+        max_disparity,
         mixed_precision,
         *args,
         **kwargs
@@ -84,22 +93,31 @@ class MobileRaftStereoModel(nn.Module):
         super().__init__(*args, **kwargs)
 
         self.hidden_dim = hidden_dim
+        self.encode_block = encode_block
         self.down_factor = down_factor
+        self.down_scale = 2 ** (down_factor - 1)
         self.cost_factor = cost_factor
         self.cost_radius = cost_radius
+        self.max_disparity = max_disparity
         self.mixed_precision = mixed_precision
 
-        self.encoder = ResidualBottleneckEncoder(
-            in_dim=3, hidden_dims=[hidden_dim] * down_factor
+        self.encoder = ImageFeatureEncoder(
+            in_dim=3, hidden_dims=[hidden_dim] * down_factor, block=self.encode_block
         )
 
-        self.cost_volume_builder = TorchInnerProductCost()
-        self.cost_volume_sampler = TorchGridSampleSearch(search_range=cost_radius)
+        self.cost_volume_builder = TorchInnerProductCost(
+            max_disparity=max_disparity // self.down_scale
+        )
+        self.flow_map_header = MySoftArgminFlowHead(
+            max_disparity=max_disparity // self.down_scale
+        )
 
         self.flow_map_update = MyGRUFlowMapUpdata(
-            in_dim=2 * cost_radius + 1, hidden_dim=32
+            in_dim=max_disparity // self.down_scale,
+            hidden_dim=hidden_dim,
+            num_of_updates=cost_factor,
         )
-        self.flow_map_header = MySoftArgminFlowHead()
+
         self.edge_map_header = MyStereoEdgeHead(
             in_dim=hidden_dim, hidden_dims=[hidden_dim] * 3
         )
@@ -113,46 +131,34 @@ class MobileRaftStereoModel(nn.Module):
             dim=0,
         )
         cost_volume = self.cost_volume_builder(l_fmap, r_fmap)
-        cost_volume = torch.unsqueeze(cost_volume, dim=1)
+        init_flow_map = self.flow_map_header(cost_volume)
+        delta_flow_map = self.flow_map_update(cost_volume)
 
-        init_flow_map = None
-        cost_pyramid = []
-        for i in range(self.cost_factor):
-            if i > 0:
-                cost_volume = F.avg_pool3d(cost_volume, kernel_size=2, stride=2)
+        flow_map = init_flow_map + delta_flow_map
+        flow_map = F.interpolate(
+            flow_map, scale_factor=self.down_scale, mode="bilinear", align_corners=True
+        )
+        flow_map *= self.down_scale
 
-            n, _, h, w, d = cost_volume.shape
+        # flow_pyramid = [flow_map]
+        # for j in np.flip(range(self.down_factor - 1)):
+        #     flow_map = F.interpolate(
+        #         flow_map, scale_factor=[2, 2], mode="bilinear", align_corners=True
+        #     ) * 2.0
 
-            flow_map = self.flow_map_header(torch.squeeze(cost_volume, dim=1))
+        #     l_fmap, r_fmap = torch.split(
+        #         encode_pyramid[j],
+        #         split_size_or_sections=encode_pyramid[j].shape[0] // 2,
+        #         dim=0,
+        #     )
+        #     r_warp_fmap = warp_feature_volume_by_flow(r_fmap, flow_map)
 
-            if i == 0:
-                init_flow_map = flow_map.clone()
+        #     edge_map = self.edge_map_header(l_fmap, r_warp_fmap)
 
-            cost_sample = self.cost_volume_sampler(
-                cost_volume.view([n, 1, h * w, d]), flow_map
-            )
-            cost_pyramid.append(cost_sample)
-        delta_flow_map = self.flow_map_update(cost_pyramid)
+        #     flow_map += edge_map
 
-        flow_map = init_flow_map.permute([0, 3, 1, 2]) + delta_flow_map
+        #     flow_pyramid.append(flow_map)
 
-        flow_pyramid = [flow_map]
-        for j in np.flip(range(self.down_factor - 1)):
-            flow_map = F.interpolate(
-                flow_map, scale_factor=[2, 2], mode="bilinear", align_corners=True
-            ) * 2.0
+        # return flow_pyramid
 
-            l_fmap, r_fmap = torch.split(
-                encode_pyramid[j],
-                split_size_or_sections=encode_pyramid[j].shape[0] // 2,
-                dim=0,
-            )
-            r_warp_fmap = warp_feature_volume_by_flow(r_fmap, flow_map)
-
-            edge_map = self.edge_map_header(l_fmap, r_warp_fmap)
-
-            flow_map += edge_map
-
-            flow_pyramid.append(flow_map)
-
-        return flow_pyramid
+        return [flow_map * -1.0]

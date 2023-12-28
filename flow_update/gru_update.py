@@ -157,35 +157,64 @@ class MyGRUCell(nn.Module):
 
 
 class MyGRUFlowMapUpdata(nn.Module):
-    def __init__(self, in_dim, hidden_dim, *args, **kwargs) -> None:
+    def __init__(self, in_dim, hidden_dim, num_of_updates, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
+        self.in_dim = in_dim
         self.hidden_dim = hidden_dim
+        self.num_of_updates = num_of_updates
+
+        self.downsample = nn.Sequential(
+            nn.Conv2d(
+                in_channels=in_dim,
+                out_channels=hidden_dim,
+                kernel_size=7,
+                padding=3,
+                stride=2,
+                bias=False,
+            ),
+            nn.BatchNorm2d(in_dim),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(
+                in_channels=hidden_dim,
+                out_channels=in_dim,
+                kernel_size=1,
+                padding=0,
+                stride=1,
+                bias=False,
+            )
+        )
 
         self.gru_cell = MyGRUCell(in_dim, hidden_dim, kernel_size=3)
 
         self.out_1x1_layer = nn.Conv2d(
-            in_channels=hidden_dim, out_channels=1, kernel_size=1, padding=0
+            in_channels=hidden_dim, out_channels=1, kernel_size=1, padding=0, bias=False
         )
 
-    def forward(self, cost_pyramid):
+    def forward(self, cost_volume):
         """
         multi-scale cost volume interactive update to generate delta flow-map
 
         assume at lowest resolution, disparity flow map == 0.0, i.e. NO distinguished left and right image feature
         """
-        n, _, h, w = cost_pyramid[-1].shape
+        n, d, h, w = cost_volume.shape
+
+        scale = 2 ** (self.num_of_updates)
 
         hidden_state = torch.zeros(
-            size=[n, self.hidden_dim, h // 2, w // 2],
-            dtype=torch.float32,
-            device=cost_pyramid[0].device,
+            size=[n, self.hidden_dim, h // scale, w // scale],
+            dtype=cost_volume.dtype,
+            device=cost_volume.device,
         )
 
-        for i in np.flip(range(len(cost_pyramid))):
-            cost_volume = cost_pyramid[i]
-
-            hidden_state = self.gru_cell(cost_volume, hidden_state)
-
-        delta_flow_map = self.out_1x1_layer(hidden_state)
+        cost_pyramid = []
+        for i in range(self.num_of_updates):
+            if i > 0:
+                cost_volume = self.downsample(cost_volume)
+            cost_pyramid.append(cost_volume)
+        
+        for j in np.flip(range(self.num_of_updates)):
+            hidden_state = self.gru_cell(cost_pyramid[j], hidden_state)
+            
+        delta_flow_map = self.out_1x1_layer(hidden_state) * float(self.in_dim)
         return delta_flow_map

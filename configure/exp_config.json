@@ -1,6 +1,6 @@
 {
-    "name": "BASE",
-    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/BASE",
+    "name": "BASE_REALTIME",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/BASE_REALTIME",
     "train": {
         "batch_size": 6,
         "restore_checkpoint": "",
@@ -23,9 +23,10 @@
         ]
     },
     "model": {
-        "hidden_dim": 64, 
-        "down_factor": 2, 
-        "cost_factor": 3, 
+        "hidden_dim": 64,
+        "encode_block": "mobilev2",
+        "down_factor": 2,
+        "cost_factor": 3,
         "cost_radius": 4,
         "max_disparity": 128,
         "mixed_precision": true
