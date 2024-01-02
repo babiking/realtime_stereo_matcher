@@ -1,6 +1,6 @@
 {
-    "name": "BASE_FLOW_UPDATE",
-    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/BASE_FLOW_UPDATE",
+    "name": "BASE_STEREO_NET",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/BASE_STEREO_NET",
     "train": {
         "batch_size": 8,
         "restore_checkpoint": "",
@@ -12,7 +12,7 @@
             "sceneflow/driving",
             "kitti"
         ],
-        "learn_rate": 0.002,
+        "learn_rate": 0.0002,
         "num_of_steps": 100000,
         "weight_decay": 0.00001
     },
@@ -22,15 +22,7 @@
             "eth3d"
         ]
     },
-    "model": {
-        "hidden_dim": 64,
-        "encode_block": "mobilev2",
-        "down_factor": 2,
-        "cost_factor": 3,
-        "cost_radius": 4,
-        "max_disparity": 128,
-        "mixed_precision": true
-    },
+    "model": {},
     "data": {
         "image_size": [
             240,

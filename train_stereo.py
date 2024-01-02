@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from model.mobile_raft_stereo import MobileRaftStereoModel
+from model.mobile_stereo_net import MobileStereoNet
 import dataset.stereo_datasets as datasets
 from torch.cuda.amp import GradScaler
 
@@ -47,31 +47,17 @@ def sequence_loss(flow_preds, flow_gt, valid, loss_gamma=0.99, max_flow=700):
             and not torch.isinf(flow_preds[i]).any()
         )
 
-        if flow_preds[i].shape != flow_gt.shape:
-            n, _, h, w = flow_preds[i].shape
-
-            i_flow_gt = F.interpolate(
-                flow_gt, [h, w], mode="bilinear", align_corners=True
-            )
-            i_valid = F.interpolate(
-                valid.float(), [h, w], mode="bilinear", align_corners=True
-            )
-            i_valid = i_valid >= 0.5
-        else:
-            i_flow_gt = flow_gt
-            i_valid = valid
-
         # We adjust the loss_gamma so it is consistent for any number of RAFT-Stereo iterations
-        adjusted_loss_gamma = loss_gamma ** (15 / max(n_predictions - 1, 3))
-        i_weight = adjusted_loss_gamma ** max(n_predictions - 1 - i, 1)
-        i_loss = (flow_preds[i] - i_flow_gt).abs()
-        assert i_loss.shape == i_valid.shape, [
+        adjusted_loss_gamma = loss_gamma ** (15 / (n_predictions - 1))
+        i_weight = adjusted_loss_gamma ** (n_predictions - i - 1)
+        i_loss = (flow_preds[i] - flow_gt).abs()
+        assert i_loss.shape == valid.shape, [
             i_loss.shape,
-            i_valid.shape,
-            i_flow_gt.shape,
+            valid.shape,
+            flow_gt.shape,
             flow_preds[i].shape,
         ]
-        flow_loss += i_weight * i_loss[i_valid.bool()].mean()
+        flow_loss += i_weight * i_loss[valid.bool()].mean()
 
     epe = torch.sum((flow_preds[-1] - flow_gt) ** 2, dim=1).sqrt()
     epe = epe.view(-1)[valid.view(-1)]
@@ -200,7 +186,7 @@ def initialize(model):
 
 
 def train(exp_config):
-    model = nn.DataParallel(MobileRaftStereoModel(**exp_config["model"]))
+    model = nn.DataParallel(MobileStereoNet(**exp_config["model"]))
     logging.info(f"Model parameter count (pytorch): {count_parameters(model)}.")
 
     train_loader = datasets.fetch_dataloader(exp_config)
@@ -219,7 +205,7 @@ def train(exp_config):
     model.train()
     initialize(model.module)
 
-    scaler = GradScaler(enabled=exp_config["model"]["mixed_precision"])
+    scaler = GradScaler(enabled=exp_config["model"].get("mixed_precision", True))
 
     should_keep_training = True
     global_batch_num = 0
