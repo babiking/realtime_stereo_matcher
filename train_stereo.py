@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from model.mobile_stereo_net import MobileStereoNet
+from model import build_model
 import dataset.stereo_datasets as datasets
 from torch.cuda.amp import GradScaler
 
@@ -186,7 +186,7 @@ def initialize(model):
 
 
 def train(exp_config):
-    model = nn.DataParallel(MobileStereoNet(**exp_config["model"]))
+    model = nn.DataParallel(build_model(exp_config["model"]))
     logging.info(f"Model parameter count (pytorch): {count_parameters(model)}.")
 
     train_loader = datasets.fetch_dataloader(exp_config)

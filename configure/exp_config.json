@@ -1,6 +1,6 @@
 {
-    "name": "BASE_STEREO_NET",
-    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/BASE_STEREO_NET",
+    "name": "BASE_RAFT_NET",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/BASE_RAFT_NET",
     "train": {
         "batch_size": 8,
         "restore_checkpoint": "",
@@ -23,8 +23,16 @@
         ]
     },
     "model": {
-        "type": "MobileStereoNet",
-        "parameters": {}
+        "type": "MobileRaftNet",
+        "parameters": {
+            "hidden_dim": 64,
+            "encode_block": "mobilev2",
+            "down_factor": 2,
+            "cost_factor": 3,
+            "cost_radius": 4,
+            "max_disparity": 128,
+            "mixed_precision": true
+        }
     },
     "data": {
         "image_size": [

@@ -78,7 +78,7 @@ def warp_feature_volume_by_flow(feature_volume, flow_map):
     return feature_warp
 
 
-class MobileRaftStereoModel(nn.Module):
+class MobileRaftNet(nn.Module):
     def __init__(
         self,
         hidden_dim,
@@ -138,22 +138,34 @@ class MobileRaftStereoModel(nn.Module):
 
         flow_pyramid = []
         for j in np.flip(range(self.down_factor)):
-            if j > self.down_factor - 1:
-                flow_map = F.interpolate(
-                    flow_map, scale_factor=[2, 2], mode="bilinear", align_corners=True
-                ) * 2.0
+            if j != self.down_factor - 1:
+                flow_map = (
+                    F.interpolate(
+                        flow_map,
+                        scale_factor=[2, 2],
+                        mode="bilinear",
+                        align_corners=True,
+                    )
+                    * 2.0
+                )
 
             l_fmap, r_fmap = torch.split(
                 encode_pyramid[j],
                 split_size_or_sections=encode_pyramid[j].shape[0] // 2,
                 dim=0,
             )
-            r_warp_fmap = warp_feature_volume_by_flow(r_fmap, flow_map)
+            r_warp_fmap = warp_feature_volume_by_flow(r_fmap, -1.0 * flow_map)
 
             edge_map = self.edge_map_header(l_fmap, r_warp_fmap)
 
             flow_map += edge_map
 
+            if left.shape[-1] != flow_map.shape[-1]:
+                scale = left.shape[-1] / flow_map.shape[-1]
+                flow_map_full = F.interpolate(flow_map * scale, left.shape[2:])
+            else:
+                flow_map_full = flow_map.clone()
+
             if is_training or (not is_training and j == self.down_factor - 1):
-                flow_pyramid.append(flow_map)
+                flow_pyramid.append(flow_map_full)
         return [-1.0 * flow_map for flow_map in flow_pyramid]
