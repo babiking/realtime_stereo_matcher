@@ -22,7 +22,10 @@
             "eth3d"
         ]
     },
-    "model": {},
+    "model": {
+        "type": "MobileStereoNet",
+        "parameters": {}
+    },
     "data": {
         "image_size": [
             240,
