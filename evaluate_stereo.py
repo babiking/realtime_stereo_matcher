@@ -6,7 +6,7 @@ import logging
 import numpy as np
 import torch
 from tqdm import tqdm
-from model.mobile_raft_stereo import MobileRaftStereoModel
+from model import build_model
 import dataset.stereo_datasets as datasets
 from dataset.input_padder import InputPadder
 import gflags
@@ -16,7 +16,7 @@ gflags.DEFINE_string(
 )
 gflags.DEFINE_string(
     "model_chkpt_file",
-    "experiments/BASE/checkpoints/BASE-epoch-100000.pth.gz",
+    "experiments/BASE_STEREO_NET/checkpoints/BASE_STEREO_NET-epoch-100000.pth.gz",
     "model checkpont file",
 )
 
@@ -226,7 +226,7 @@ def main():
 
     exp_config = json.load(open(FLAGS.exp_config_json, "r"))
 
-    model = torch.nn.DataParallel(MobileRaftStereoModel(**exp_config["model"])).to(
+    model = torch.nn.DataParallel(build_model(exp_config["model"])).to(
         torch.device("cuda" if torch.cuda.is_available() else "cpu")
     )
 
@@ -248,7 +248,7 @@ def main():
     # The CUDA implementations of the correlation volume prevent half-precision
     # rounding errors in the correlation lookup. This allows us to use mixed precision
     # in the entire forward pass, not just in the GRUs & feature extractors.
-    use_mixed_precision = exp_config["model"]["mixed_precision"]
+    use_mixed_precision = exp_config["model"].get("mixed_precision", True)
 
     for dataset in exp_config["test"]["datasets"]:
         if dataset == "eth3d":
