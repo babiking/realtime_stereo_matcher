@@ -2,10 +2,13 @@ from __future__ import print_function, division
 import os
 import sys
 import json
+import time
 import logging
 import numpy as np
 import torch
 import cv2 as cv
+from thop import profile
+from fvcore.nn import FlopCountAnalysis, parameter_count_table
 from model import build_model
 from dataset.input_padder import InputPadder
 from tools.pfm_file_io import write_pfm_file
@@ -23,12 +26,12 @@ gflags.DEFINE_string(
 gflags.DEFINE_string("name", "D435I", "data name")
 gflags.DEFINE_string(
     "left",
-    "/mnt/data/workspace/datasets/D435I/outdoor_blank_plane/image/100cm_left_Img.bmp",
+    "/mnt/data/workspace/datasets/D435I/outdoor_stripe_plane/image/100cm_left_Img.bmp",
     "left image file",
 )
 gflags.DEFINE_string(
     "right",
-    "/mnt/data/workspace/datasets/D435I/outdoor_blank_plane/image/100cm_right_Img.bmp",
+    "/mnt/data/workspace/datasets/D435I/outdoor_stripe_plane/image/100cm_right_Img.bmp",
     "right image file",
 )
 
@@ -88,7 +91,21 @@ def main():
     image1, image2 = padder.pad(image1, image2)
 
     with autocast(enabled=use_mixed_precision):
+        start = time.time()
         flow_pr = model(image1, image2)[-1]
+        end = time.time()
+
+        fps = 1.0 / (end - start)
+        print(f"The model inference FPS: {fps:.4f}.")
+
+        try:
+            n_macs, n_params = profile(model, inputs=(image1, image2))
+            n_flops = FlopCountAnalysis(model, inputs=(image1, image2)).total()
+
+            print(f"#MACS: {n_macs / 1e9:.6f}G, #params: {n_params / 1e6:.6f}M, #flops: {n_flops / 1e9:.6f}G.")
+        except:
+            pass
+
     flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
 
     flow_pr = -1.0 * np.squeeze(flow_pr.cpu().detach().numpy(), axis=0)
