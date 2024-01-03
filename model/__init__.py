@@ -1,5 +1,5 @@
 from model.mobile_stereo_net import MobileStereoNet
-from model.mobile_raft_stereo import MobileRaftNet
+from model.mobile_raft_net import MobileRaftNet
 
 
 def build_model(model_config):
