@@ -34,7 +34,7 @@ def validate_eth3d(model, mixed_prec=False):
     aug_params = {}
     val_dataset = datasets.ETH3D(aug_params)
 
-    out_list, epe_list = [], []
+    out_list, epe_list, fps_list = [], [], []
     for val_id in range(len(val_dataset)):
         _, image1, image2, flow_gt, valid_gt = val_dataset[val_id]
         image1 = image1[None].cuda()
@@ -44,7 +44,9 @@ def validate_eth3d(model, mixed_prec=False):
         image1, image2 = padder.pad(image1, image2)
 
         with autocast(enabled=mixed_prec):
+            start = time.time()
             flow_pr = model(image1, image2)[-1]
+            end = time.time()
         flow_pr = padder.unpad(flow_pr.float()).cpu().squeeze(0)
         assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
         epe = torch.sum((flow_pr - flow_gt) ** 2, dim=0).sqrt()
@@ -54,8 +56,9 @@ def validate_eth3d(model, mixed_prec=False):
         out = epe_flattened > 1.0
         image_out = out[val].float().mean().item()
         image_epe = epe_flattened[val].mean().item()
+        image_fps = 1.0 / (end - start)
         logging.info(
-            f"ETH3D {val_id+1} out of {len(val_dataset)}. EPE {round(image_epe,4)} D1 {round(image_out,4)}"
+            f"ETH3D {val_id+1} out of {len(val_dataset)}. EPE: {image_epe:.4f}, D1: {image_out:.4f}, FPS: {image_fps:.4f}."
         )
 
         if image_epe > 80.0:
@@ -63,15 +66,18 @@ def validate_eth3d(model, mixed_prec=False):
 
         epe_list.append(image_epe)
         out_list.append(image_out)
+        fps_list.append(image_fps)
 
     epe_list = np.array(epe_list)
     out_list = np.array(out_list)
+    fps_list = np.array(fps_list)
 
     epe = np.mean(epe_list)
     d1 = 100 * np.mean(out_list)
+    fps = np.mean(fps_list)
 
-    print("Validation ETH3D: EPE %f, D1 %f" % (epe, d1))
-    return {"eth3d-epe": epe, "eth3d-d1": d1}
+    print("Validation ETH3D: EPE %.4f, D1 %.4f, FPS: %.4f" % (epe, d1, fps))
+    return {"eth3d-epe": epe, "eth3d-d1": d1, "eth3d-fps": fps}
 
 
 @torch.no_grad()
@@ -82,7 +88,7 @@ def validate_kitti(model, mixed_prec=False):
     val_dataset = datasets.KITTI(aug_params, image_set="training")
     torch.backends.cudnn.benchmark = True
 
-    out_list, epe_list, elapsed_list = [], [], []
+    out_list, epe_list, fps_list = [], [], []
     for val_id in range(len(val_dataset)):
         _, image1, image2, flow_gt, valid_gt = val_dataset[val_id]
         image1 = image1[None].cuda()
@@ -96,8 +102,6 @@ def validate_kitti(model, mixed_prec=False):
             flow_pr = model(image1, image2)[-1]
             end = time.time()
 
-        if val_id > 50:
-            elapsed_list.append(end - start)
         flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
 
         assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
@@ -109,25 +113,25 @@ def validate_kitti(model, mixed_prec=False):
         out = epe_flattened > 1.0
         image_out = out[val].float().mean().item()
         image_epe = epe_flattened[val].mean().item()
+        image_fps = 1.0 / (end - start)
         if val_id < 9 or (val_id + 1) % 10 == 0:
             logging.info(
-                f"KITTI Iter {val_id+1} out of {len(val_dataset)}. EPE {round(image_epe,4)} D1 {round(image_out,4)}. Runtime: {format(end-start, '.3f')}s ({format(1/(end-start), '.2f')}-FPS)"
+                f"KITTI {val_id+1} out of {len(val_dataset)}. EPE: {image_epe:.4f}, D1: {image_out:.4f}, FPS: {image_fps:.4f}."
             )
         epe_list.append(epe_flattened[val].mean().item())
         out_list.append(out[val].cpu().numpy())
+        fps_list.append(image_fps)
 
     epe_list = np.array(epe_list)
     out_list = np.concatenate(out_list)
+    fps_list = np.array(fps_list)
 
     epe = np.mean(epe_list)
     d1 = 100 * np.mean(out_list)
+    fps = np.mean(fps_list)
 
-    avg_runtime = np.mean(elapsed_list)
-
-    print(
-        f"Validation KITTI: EPE {epe}, D1 {d1}, {format(1/avg_runtime, '.2f')}-FPS ({format(avg_runtime, '.3f')}s)"
-    )
-    return {"kitti-epe": epe, "kitti-d1": d1}
+    print("Validation KITTI: EPE %.4f, D1 %.4f, FPS: %.4f" % (epe, d1, fps))
+    return {"kitti-epe": epe, "kitti-d1": d1, "kitti-fps": fps}
 
 
 @torch.no_grad()
@@ -138,7 +142,7 @@ def validate_things(model, mixed_prec=False):
         dstype="frames_finalpass", things_test=True
     )
 
-    out_list, epe_list = [], []
+    out_list, epe_list, fps_list = [], [], []
     for val_id in tqdm(range(len(val_dataset))):
         _, image1, image2, flow_gt, valid_gt = val_dataset[val_id]
         image1 = image1[None].cuda()
@@ -148,7 +152,9 @@ def validate_things(model, mixed_prec=False):
         image1, image2 = padder.pad(image1, image2)
 
         with autocast(enabled=mixed_prec):
+            start = time.time()
             flow_pr = model(image1, image2)[-1]
+            end = time.time()
         flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
         assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
         epe = torch.sum((flow_pr - flow_gt) ** 2, dim=0).sqrt()
@@ -159,15 +165,18 @@ def validate_things(model, mixed_prec=False):
         out = epe > 1.0
         epe_list.append(epe[val].mean().item())
         out_list.append(out[val].cpu().numpy())
+        fps_list.append(1.0 / (end - start))
 
     epe_list = np.array(epe_list)
     out_list = np.concatenate(out_list)
+    fps_list = np.array(fps_list)
 
     epe = np.mean(epe_list)
     d1 = 100 * np.mean(out_list)
+    fps = np.mean(fps_list)
 
-    print("Validation FlyingThings: %f, %f" % (epe, d1))
-    return {"things-epe": epe, "things-d1": d1}
+    print("Validation THINGS: EPE %.4f, D1 %.4f, FPS: %.4f" % (epe, d1, fps))
+    return {"things-epe": epe, "things-d1": d1, "things-fps": fps}
 
 
 @torch.no_grad()
@@ -177,7 +186,7 @@ def validate_middlebury(model, split="F", mixed_prec=False):
     aug_params = {}
     val_dataset = datasets.Middlebury(aug_params, split=split)
 
-    out_list, epe_list = [], []
+    out_list, epe_list, fps_list = [], [], []
     for val_id in range(len(val_dataset)):
         (imageL_file, _, _), image1, image2, flow_gt, valid_gt = val_dataset[val_id]
         image1 = image1[None].cuda()
@@ -187,7 +196,9 @@ def validate_middlebury(model, split="F", mixed_prec=False):
         image1, image2 = padder.pad(image1, image2)
 
         with autocast(enabled=mixed_prec):
+            start = time.time()
             flow_pr = model(image1, image2)[-1]
+            end = time.time()
         flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
 
         assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
@@ -199,20 +210,24 @@ def validate_middlebury(model, split="F", mixed_prec=False):
         out = epe_flattened > 1.0
         image_out = out[val].float().mean().item()
         image_epe = epe_flattened[val].mean().item()
+        image_fps = 1.0 / (end - start)
         logging.info(
-            f"Middlebury Iter {val_id+1} out of {len(val_dataset)}. EPE {round(image_epe,4)} D1 {round(image_out,4)}"
+            f"MIDDLEBURY {val_id+1} out of {len(val_dataset)}. EPE: {image_epe:.4f}, D1: {image_out:.4f}, FPS: {image_fps:.4f}."
         )
         epe_list.append(image_epe)
         out_list.append(image_out)
+        fps_list.append(image_fps)
 
     epe_list = np.array(epe_list)
     out_list = np.array(out_list)
+    fps_list = np.array(fps_list)
 
     epe = np.mean(epe_list)
     d1 = 100 * np.mean(out_list)
+    fps = np.mean(fps_list)
 
-    print(f"Validation Middlebury{split}: EPE {epe}, D1 {d1}")
-    return {f"middlebury{split}-epe": epe, f"middlebury{split}-d1": d1}
+    print("Validation Middlebury: EPE %.4f, D1 %.4f, FPS: %.4f" % (epe, d1, fps))
+    return {"middlebury-epe": epe, "middlebury-d1": d1, "middlebury-fps": fps}
 
 
 def main():
