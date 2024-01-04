@@ -12,7 +12,9 @@ from dataset.input_padder import InputPadder
 import gflags
 
 gflags.DEFINE_string(
-    "exp_config_json", "configure/exp_config.json", "experiment configure json file"
+    "exp_config_json",
+    "configure/stereo_net_config.json",
+    "experiment configure json file",
 )
 gflags.DEFINE_string(
     "model_chkpt_file",
@@ -53,12 +55,20 @@ def validate_eth3d(model, mixed_prec=False):
 
         epe_flattened = epe.flatten()
         val = valid_gt.flatten() >= 0.5
-        out = epe_flattened > 1.0
-        image_out = out[val].float().mean().item()
+        out_0_5 = epe_flattened > 0.5
+        out_1_0 = epe_flattened > 1.0
+        out_3_0 = epe_flattened > 3.0
+        out_5_0 = epe_flattened > 5.0
+        image_out = [
+            out_0_5[val].float().mean().item(),
+            out_1_0[val].float().mean().item(),
+            out_3_0[val].float().mean().item(),
+            out_5_0[val].float().mean().item(),
+        ]
         image_epe = epe_flattened[val].mean().item()
         image_fps = 1.0 / (end - start)
         logging.info(
-            f"ETH3D {val_id+1} out of {len(val_dataset)}. EPE: {image_epe:.4f}, D1: {image_out:.4f}, FPS: {image_fps:.4f}."
+            f"ETH3D {val_id+1} out of {len(val_dataset)}. EPE: {image_epe:.4f}, D1: {image_out[1]:.4f}, FPS: {image_fps:.4f}."
         )
 
         if image_epe > 80.0:
@@ -73,11 +83,21 @@ def validate_eth3d(model, mixed_prec=False):
     fps_list = np.array(fps_list)
 
     epe = np.mean(epe_list)
-    d1 = 100 * np.mean(out_list)
+    bads = 100 * np.mean(out_list, axis=0)
     fps = np.mean(fps_list)
 
-    print("Validation ETH3D: EPE %.4f, D1 %.4f, FPS: %.4f" % (epe, d1, fps))
-    return {"eth3d-epe": epe, "eth3d-d1": d1, "eth3d-fps": fps}
+    print(
+        "Validation ETH3D: EPE=%.4f, bad0.5=%.4f, bad1.0=%.4f, bad3.0=%.4f, bad5.0=%.4f, FPS=%.4f"
+        % (epe, bads[0], bads[1], bads[2], bads[3], fps)
+    )
+    return {
+        "eth3d-epe": epe,
+        "eth3d-bad0.5": bads[0],
+        "eth3d-bad1.0": bads[1],
+        "eth3d-bad3.0": bads[2],
+        "eth3d-bad5.0": bads[3],
+        "eth3d-fps": fps,
+    }
 
 
 @torch.no_grad()
@@ -207,12 +227,20 @@ def validate_middlebury(model, split="F", mixed_prec=False):
         epe_flattened = epe.flatten()
         val = (valid_gt.reshape(-1) >= -0.5) & (flow_gt[0].reshape(-1) > -1000)
 
-        out = epe_flattened > 1.0
-        image_out = out[val].float().mean().item()
+        out_0_5 = epe_flattened > 0.5
+        out_1_0 = epe_flattened > 1.0
+        out_3_0 = epe_flattened > 3.0
+        out_5_0 = epe_flattened > 5.0
+        image_out = [
+            out_0_5[val].float().mean().item(),
+            out_1_0[val].float().mean().item(),
+            out_3_0[val].float().mean().item(),
+            out_5_0[val].float().mean().item(),
+        ]
         image_epe = epe_flattened[val].mean().item()
         image_fps = 1.0 / (end - start)
         logging.info(
-            f"MIDDLEBURY {val_id+1} out of {len(val_dataset)}. EPE: {image_epe:.4f}, D1: {image_out:.4f}, FPS: {image_fps:.4f}."
+            f"MIDDLEBURY {val_id+1} out of {len(val_dataset)}. EPE: {image_epe:.4f}, D1: {image_out[1]:.4f}, FPS: {image_fps:.4f}."
         )
         epe_list.append(image_epe)
         out_list.append(image_out)
@@ -223,11 +251,21 @@ def validate_middlebury(model, split="F", mixed_prec=False):
     fps_list = np.array(fps_list)
 
     epe = np.mean(epe_list)
-    d1 = 100 * np.mean(out_list)
+    bads = 100 * np.mean(out_list, axis=0)
     fps = np.mean(fps_list)
 
-    print("Validation Middlebury: EPE %.4f, D1 %.4f, FPS: %.4f" % (epe, d1, fps))
-    return {"middlebury-epe": epe, "middlebury-d1": d1, "middlebury-fps": fps}
+    print(
+        "Validation Middlebury: EPE=%.4f, bad0.5=%.4f, bad1.0=%.4f, bad3.0=%.4f, bad5.0=%.4f, FPS=%.4f"
+        % (epe, bads[0], bads[1], bads[2], bads[3], fps)
+    )
+    return {
+        "middlebury-epe": epe,
+        "middlebury-bad0.5": bads[0],
+        "middlebury-bad1.0": bads[1],
+        "middlebury-bad3.0": bads[2],
+        "middlebury-bad5.0": bads[3],
+        "middlebury-fps": fps,
+    }
 
 
 def main():
