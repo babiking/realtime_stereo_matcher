@@ -127,7 +127,7 @@ class FlowAugmentor:
         scale_x = np.clip(scale_x, min_scale, None)
         scale_y = np.clip(scale_y, min_scale, None)
 
-        if np.random.rand() < self.spatial_aug_prob:
+        if np.random.rand() < self.spatial_aug_prob or scale_x > 1.0 or scale_y > 1.0:
             # rescale the images
             img1 = cv2.resize(img1, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
             img2 = cv2.resize(img2, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
@@ -266,7 +266,7 @@ class SparseFlowAugmentor:
         scale_x = np.clip(scale, min_scale, None)
         scale_y = np.clip(scale, min_scale, None)
 
-        if np.random.rand() < self.spatial_aug_prob:
+        if np.random.rand() < self.spatial_aug_prob or scale_x > 1.0 or scale_y > 1.0:
             # rescale the images
             img1 = cv2.resize(img1, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
             img2 = cv2.resize(img2, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)

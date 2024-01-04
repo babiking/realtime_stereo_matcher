@@ -1,8 +1,8 @@
 {
-    "name": "BASE_STEREO_NET",
-    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/BASE_STEREO_NET",
+    "name": "480P_STEREO_NET",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/480P_STEREO_NET",
     "train": {
-        "batch_size": 8,
+        "batch_size": 4,
         "restore_checkpoint": "",
         "save_checkpoint_frequency": 10000,
         "datasets": [
@@ -28,8 +28,8 @@
     },
     "data": {
         "image_size": [
-            240,
-            320
+            480,
+            640
         ],
         "image_gamma": [],
         "spatial_scale": [
@@ -40,7 +40,7 @@
             0,
             1.4
         ],
-        "do_flip": false,
+        "do_flip": "h",
         "no_y_jitter": false
     }
 }
