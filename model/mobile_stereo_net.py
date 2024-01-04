@@ -1,19 +1,29 @@
+# MobileStereoNet implementation based on: https://github.com/zjjMaiMai/TinyHITNet
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
 def make_cost_volume(left, right, max_disp):
+    # left: 1 x 32 x 60 x 80
+    # right: 1 x 32 x 60 x 80
+    # max_disp: 24
+    # cost_volume: 1 x 32 x 24 x 60 x 80
     cost_volume = torch.ones(
         (left.size(0), left.size(1), max_disp, left.size(2), left.size(3)),
         dtype=left.dtype,
         device=left.device,
     )
 
+    # for any disparity d:
+    #   cost_volume[:, :, d, :, :d] = 1.0
+    #   cost_volume[:, :, d, :, d:] = left[:, :, :, d:] - right[:, :, :, :-d]
     cost_volume[:, :, 0, :, :] = left - right
     for d in range(1, max_disp):
         cost_volume[:, :, d, :, d:] = left[:, :, :, d:] - right[:, :, :, :-d]
 
+    # cost_volume: 1 x 32 x 24 x 60 x 80
     return cost_volume
 
 
@@ -57,15 +67,23 @@ class RefineNet(nn.Module):
         )
 
     def forward(self, disp, rgb):
+        # disp: 1 x 1 x 60 x 80
+        # rgb: 1 x 3 x 480 x 640
+
+        # disp: 1 x 1 x 120 x 160
         disp = (
             F.interpolate(disp, scale_factor=2, mode="bilinear", align_corners=False)
             * 2
         )
+        # rgb: 1 x 3 x 120 x 160
         rgb = F.interpolate(
             rgb, (disp.size(2), disp.size(3)), mode="bilinear", align_corners=False
         )
+        # x: 1 x 4 x 120 x 160
         x = torch.cat((disp, rgb), dim=1)
+        # x: 1 x 1 x 120 x 160
         x = self.conv0(x)
+        # x: 1 x 1 x 120 x 160, x >= 0.0
         return F.relu(disp + x)
 
 
@@ -107,24 +125,35 @@ class MobileStereoNet(nn.Module):
         w_pad = (self.align - (w % self.align)) % self.align
         h_pad = (self.align - (h % self.align)) % self.align
 
+        # left_img: 1 x 3 x 480 x 640
         left_img = F.pad(left_img, (0, w_pad, 0, h_pad))
         right_img = F.pad(right_img, (0, w_pad, 0, h_pad))
 
+        # lf: 1 x 32 x 60 x 80, i.e. 8x downsample
         lf = self.feature_extractor(left_img)
         rf = self.feature_extractor(right_img)
 
+        # lf: 1 x 32 x 60 x 80
+        # rf: 1 x 32 x 60 x 80
+        # max_disp: 192 // 8 = 24
+        # cost_volume: 1 x 32 x 24 x 60 x 80
         cost_volume = make_cost_volume(lf, rf, self.max_disp)
+        # cost_volume: 1 x 24 x 60 x 80
         cost_volume = self.cost_filter(cost_volume).squeeze(1)
 
         x = F.softmax(cost_volume, dim=1)
         d = torch.arange(0, self.max_disp, device=x.device, dtype=x.dtype)
+        # x: 1 x 1 x 60 x 80
         x = torch.sum(x * d.view(1, -1, 1, 1), dim=1, keepdim=True)
 
         multi_scale = []
         for refine in self.refine_layer:
+            # x: 1 x 1 x 60 x 80
+            # left_img: 1 x 3 x 480 x 640
             x = refine(x, left_img)
             scale = left_img.size(3) / x.size(3)
+            # full_res: 1 x 1 x 480 x 640
             full_res = F.interpolate(x * scale, left_img.shape[2:])[:, :, :h, :w]
             multi_scale.append(full_res)
 
-        return [-1.0 * flow_map for flow_map in multi_scale]
+        return [-1.0 *  flow_map for flow_map in multi_scale]
