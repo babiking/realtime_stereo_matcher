@@ -1,0 +1,46 @@
+{
+    "name": "480P_STEREO_NET",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/480P_STEREO_NET",
+    "train": {
+        "batch_size": 4,
+        "restore_checkpoint": "",
+        "save_checkpoint_frequency": 10000,
+        "datasets": [
+            "middlebury_2014",
+            "eth3d",
+            "sceneflow/things",
+            "sceneflow/driving",
+            "kitti"
+        ],
+        "learn_rate": 0.0002,
+        "num_of_steps": 100000,
+        "weight_decay": 0.00001
+    },
+    "test": {
+        "datasets": [
+            "middlebury_Q",
+            "eth3d"
+        ]
+    },
+    "model": {
+        "type": "MobileStereoNet",
+        "parameters": {}
+    },
+    "data": {
+        "image_size": [
+            480,
+            640
+        ],
+        "image_gamma": [],
+        "spatial_scale": [
+            -0.2,
+            0.4
+        ],
+        "saturation_range": [
+            0,
+            1.4
+        ],
+        "do_flip": "h",
+        "no_y_jitter": false
+    }
+}
