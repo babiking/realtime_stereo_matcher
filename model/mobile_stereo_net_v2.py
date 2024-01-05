@@ -91,7 +91,7 @@ def warp_by_flow_map(image, flow):
     grid_map = torch.concatenate((grid_x, grid_y), dim=-1)
 
     warped = F.grid_sample(
-        image, grid_map, mode="bilinear", padding_mode="zeros", align_corners=True
+        image, grid_map, mode="bilinear", padding_mode="zeros", align_corners=False
     )
     return warped
 
