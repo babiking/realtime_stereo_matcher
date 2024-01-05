@@ -23,11 +23,11 @@ def warp_by_flow_map(image, flow):
         indexing="ij",
     )
 
-    grid_x = grid_x.view([1, 1, h, w]) - flow[:, 0, :, :]
+    grid_x = grid_x.view([1, 1, h, w]) - flow[:, 0, :, :].view([n, 1, h, w])
     grid_x = grid_x.permute([0, 2, 3, 1])
 
     if c == 2:
-        grid_y = grid_y.view([1, 1, h, w]) - flow[:, 1, :, :]
+        grid_y = grid_y.view([1, 1, h, w]) - flow[:, 1, :, :].view([n, 1, h, w])
         grid_y = grid_y.permute([0, 2, 3, 1])
     else:
         grid_y = grid_y.view([1, h, w, 1]).repeat(n, 1, 1, 1)
