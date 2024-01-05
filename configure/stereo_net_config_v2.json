@@ -27,6 +27,7 @@
         "parameters": {
             "down_factor": 3,
             "max_disp": 192,
+            "refine_dim": 4,
             "refine_dilates": [
                 1,
                 2,

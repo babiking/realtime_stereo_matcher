@@ -12,9 +12,10 @@ def make_cost_volume(left, right, max_disp):
     # cost_volume: 1 x 32 x 24 x 60 x 80
     n, c, h, w = left.shape
 
-    cost_volume = torch.ones(
-        size=[n, c, max_disp, h, w], dtype=left.dtype, device=left.device
-    ) * -1.0
+    cost_volume = (
+        torch.ones(size=[n, c, max_disp, h, w], dtype=left.dtype, device=left.device)
+        * -1.0
+    )
 
     # for any disparity d:
     #   cost_volume[:, :, d, :, :d] = 1.0
@@ -94,6 +95,7 @@ class MobileStereoNetV2(nn.Module):
         self,
         down_factor=3,
         max_disp=192,
+        refine_dim=4,
         refine_dilates=[1, 2, 4, 8, 1, 1],
         hidden_dim=32,
     ):
@@ -102,6 +104,7 @@ class MobileStereoNetV2(nn.Module):
         self.align = 2**self.down_factor
         self.max_disp = (max_disp + 1) // (2**self.down_factor)
 
+        self.refine_dim = refine_dim
         self.refine_dilates = refine_dilates
         self.hidden_dim = hidden_dim
 
@@ -138,7 +141,7 @@ class MobileStereoNetV2(nn.Module):
         self.refine_layer = nn.ModuleList(
             [
                 RefineNet(
-                    in_dim=4,
+                    in_dim=self.refine_dim,
                     hidden_dim=self.hidden_dim,
                     refine_dilates=self.refine_dilates,
                 )
