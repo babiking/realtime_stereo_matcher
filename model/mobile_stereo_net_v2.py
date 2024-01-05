@@ -12,9 +12,8 @@ def make_cost_volume(left, right, max_disp):
     # cost_volume: 1 x 32 x 24 x 60 x 80
     n, c, h, w = left.shape
 
-    cost_volume = (
-        torch.ones(size=[n, c, max_disp, h, w], dtype=left.dtype, device=left.device)
-        * -1.0
+    cost_volume = torch.ones(
+        size=[n, c, max_disp, h, w], dtype=left.dtype, device=left.device
     )
 
     # for any disparity d:
@@ -57,6 +56,46 @@ class ResBlock(nn.Module):
         return x + input
 
 
+def warp_by_flow_map(image, flow):
+    """
+    warp image according to stereo flow map (i.e. disparity map)
+
+    Args:
+        [1] image, N x C x H x W, original image or feature map
+        [2] flow,  N x 1 x H x W or N x 2 x H x W, flow map
+
+    Return:
+        [1] warped, N x C x H x W, warped image or feature map
+    """
+    n, c, h, w = flow.shape
+
+    assert c == 1 or c == 2, f"invalid flow map dimension 1 or 2 ({c})!"
+
+    grid_y, grid_x = torch.meshgrid(
+        torch.arange(h, device=image.device, dtype=image.dtype),
+        torch.arange(w, device=image.device, dtype=image.dtype),
+        indexing="ij",
+    )
+
+    grid_x = grid_x.view([1, 1, h, w]) - flow[:, 0, :, :].view([n, 1, h, w])
+    grid_x = grid_x.permute([0, 2, 3, 1])
+
+    if c == 2:
+        grid_y = grid_y.view([1, 1, h, w]) - flow[:, 1, :, :].view([n, 1, h, w])
+        grid_y = grid_y.permute([0, 2, 3, 1])
+    else:
+        grid_y = grid_y.view([1, h, w, 1]).repeat(n, 1, 1, 1)
+
+    grid_x = 2.0 * grid_x / (w - 1.0) - 1.0
+    grid_y = 2.0 * grid_y / (h - 1.0) - 1.0
+    grid_map = torch.concatenate((grid_x, grid_y), dim=-1)
+
+    warped = F.grid_sample(
+        image, grid_map, mode="bilinear", padding_mode="zeros", align_corners=True
+    )
+    return warped
+
+
 class RefineNet(nn.Module):
     def __init__(self, in_dim, hidden_dim, refine_dilates):
         super().__init__()
@@ -69,7 +108,7 @@ class RefineNet(nn.Module):
             nn.Conv2d(self.hidden_dim, 1, 3, 1, 1),
         )
 
-    def forward(self, disp, rgb):
+    def forward(self, disp, l_rgb, r_rgb):
         # disp: 1 x 1 x 60 x 80
         # rgb: 1 x 3 x 480 x 640
 
@@ -79,11 +118,16 @@ class RefineNet(nn.Module):
             * 2
         )
         # rgb: 1 x 3 x 120 x 160
-        rgb = F.interpolate(
-            rgb, (disp.size(2), disp.size(3)), mode="bilinear", align_corners=False
+        l_rgb = F.interpolate(
+            l_rgb, (disp.size(2), disp.size(3)), mode="bilinear", align_corners=False
         )
+        r_rgb = F.interpolate(
+            r_rgb, (disp.size(2), disp.size(3)), mode="bilinear", align_corners=False
+        )
+        r_rgb = warp_by_flow_map(r_rgb, disp)
+
         # x: 1 x 4 x 120 x 160
-        x = torch.cat((disp, rgb), dim=1)
+        x = torch.cat((disp, l_rgb, r_rgb), dim=1)
         # x: 1 x 1 x 120 x 160
         x = self.conv0(x)
         # x: 1 x 1 x 120 x 160, x >= 0.0
@@ -95,7 +139,7 @@ class MobileStereoNetV2(nn.Module):
         self,
         down_factor=3,
         max_disp=192,
-        refine_dim=4,
+        refine_dim=7,
         refine_dilates=[1, 2, 4, 8, 1, 1],
         hidden_dim=32,
     ):
@@ -117,10 +161,7 @@ class MobileStereoNetV2(nn.Module):
                 conv_3x3(self.hidden_dim, self.hidden_dim, 2),
                 ResBlock(self.hidden_dim),
             ]
-        self.feature_extractor += [
-            nn.Conv2d(self.hidden_dim, self.hidden_dim, 3, 1, 1),
-            nn.Sigmoid(),
-        ]
+        self.feature_extractor += [nn.Conv2d(self.hidden_dim, self.hidden_dim, 3, 1, 1)]
         self.feature_extractor = nn.Sequential(*self.feature_extractor)
 
         self.cost_filter = nn.Sequential(
@@ -182,7 +223,7 @@ class MobileStereoNetV2(nn.Module):
         for refine in self.refine_layer:
             # x: 1 x 1 x 60 x 80
             # left_img: 1 x 3 x 480 x 640
-            x = refine(x, left_img)
+            x = refine(x, left_img, right_img)
             scale = left_img.size(3) / x.size(3)
             # full_res: 1 x 1 x 480 x 640
             full_res = F.interpolate(x * scale, left_img.shape[2:])[:, :, :h, :w]
