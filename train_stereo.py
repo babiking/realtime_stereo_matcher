@@ -11,7 +11,6 @@ from torch.utils.tensorboard import SummaryWriter
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
 from model import build_model
 import dataset.stereo_datasets as datasets
 from torch.cuda.amp import GradScaler
@@ -21,7 +20,7 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/stereo_net_config_v3.json",
+    "configure/disp_net_c_config.json",
     "experiment configure json file",
 )
 
