@@ -215,6 +215,8 @@ class MobileDispNetC(nn.Module):
 
     def forward(self, img_left, img_right):
         # img_left: 1 x 3 x 480 x 640
+        img_left = (2.0 * (img_left / 255.0) - 1.0).contiguous()
+        img_right = (2.0 * (img_right / 255.0) - 1.0).contiguous()
 
         # conv1_l: 1 x 64 x 240 x 320
         conv1_l = self.conv1(img_left)  # 3-64
