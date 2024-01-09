@@ -13,12 +13,12 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/stereo_net_config.json",
+    "configure/stereo_net_config_v3.json",
     "experiment configure json file",
 )
 gflags.DEFINE_string(
     "model_chkpt_file",
-    "experiments/BASE_STEREO_NET/checkpoints/BASE_STEREO_NET-epoch-100000.pth.gz",
+    "experiments/200K_STEREO_NET_V3/checkpoints/200K_STEREO_NET_V3-epoch-200000.pth.gz",
     "model checkpont file",
 )
 

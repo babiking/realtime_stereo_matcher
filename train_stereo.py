@@ -21,7 +21,7 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/exp_config.json",
+    "configure/stereo_net_config_v3.json",
     "experiment configure json file",
 )
 

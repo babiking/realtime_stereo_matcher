@@ -1,6 +1,6 @@
 {
-    "name": "UNET_STEREO_NET_V3",
-    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/UNET_STEREO_NET_V3",
+    "name": "200K_STEREO_NET_V3",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/200K_STEREO_NET_V3",
     "train": {
         "batch_size": 8,
         "restore_checkpoint": "",
@@ -13,7 +13,7 @@
             "kitti"
         ],
         "learn_rate": 0.0002,
-        "num_of_steps": 100000,
+        "num_of_steps": 200000,
         "weight_decay": 0.00001
     },
     "test": {
