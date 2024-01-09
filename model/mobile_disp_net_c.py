@@ -320,7 +320,7 @@ class MobileDispNetC(nn.Module):
             pr0 = F.softmax(pr0, dim=1)
             pr0 = disparity_regression(pr0, self.maxdisp)
 
-        disps = [pr0, pr1, pr2, pr3, pr4, pr5, pr6]
+        disps = [pr6, pr5, pr4, pr3, pr2, pr1, pr0]
         disps = [-1.0 * self.resize_disparity_map(x, img_left.shape[2:]) for x in disps]
 
         # can be chosen outside
