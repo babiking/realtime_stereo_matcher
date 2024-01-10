@@ -13,12 +13,12 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/stereo_net_config_v3.json",
+    "configure/disp_net_c_config.json",
     "experiment configure json file",
 )
 gflags.DEFINE_string(
     "model_chkpt_file",
-    "experiments/200K_STEREO_NET_V3/checkpoints/200K_STEREO_NET_V3-epoch-200000.pth.gz",
+    "experiments/BASE_DISP_NET_C/checkpoints/BASE_DISP_NET_C-epoch-100000.pth.gz",
     "model checkpont file",
 )
 
@@ -42,7 +42,7 @@ def validate_eth3d(model, mixed_prec=False):
         image1 = image1[None].cuda()
         image2 = image2[None].cuda()
 
-        padder = InputPadder(image1.shape, divis_by=32)
+        padder = InputPadder(image1.shape, divis_by=64)
         image1, image2 = padder.pad(image1, image2)
 
         with autocast(enabled=mixed_prec):
@@ -54,7 +54,7 @@ def validate_eth3d(model, mixed_prec=False):
         epe = torch.sum((flow_pr - flow_gt) ** 2, dim=0).sqrt()
 
         epe_flattened = epe.flatten()
-        val = valid_gt.flatten() >= 0.5
+        val = (valid_gt.flatten() >= 0.5) & (torch.isnan(flow_pr.flatten()) == 0)
         out_0_5 = epe_flattened > 0.5
         out_1_0 = epe_flattened > 1.0
         out_3_0 = epe_flattened > 3.0
@@ -114,7 +114,7 @@ def validate_kitti(model, mixed_prec=False):
         image1 = image1[None].cuda()
         image2 = image2[None].cuda()
 
-        padder = InputPadder(image1.shape, divis_by=32)
+        padder = InputPadder(image1.shape, divis_by=64)
         image1, image2 = padder.pad(image1, image2)
 
         with autocast(enabled=mixed_prec):
@@ -128,7 +128,7 @@ def validate_kitti(model, mixed_prec=False):
         epe = torch.sum((flow_pr - flow_gt) ** 2, dim=0).sqrt()
 
         epe_flattened = epe.flatten()
-        val = valid_gt.flatten() >= 0.5
+        val = (valid_gt.flatten() >= 0.5) & (torch.isnan(flow_pr.flatten()) == 0)
 
         out = epe_flattened > 1.0
         image_out = out[val].float().mean().item()
@@ -168,7 +168,7 @@ def validate_things(model, mixed_prec=False):
         image1 = image1[None].cuda()
         image2 = image2[None].cuda()
 
-        padder = InputPadder(image1.shape, divis_by=32)
+        padder = InputPadder(image1.shape, divis_by=64)
         image1, image2 = padder.pad(image1, image2)
 
         with autocast(enabled=mixed_prec):
@@ -180,7 +180,7 @@ def validate_things(model, mixed_prec=False):
         epe = torch.sum((flow_pr - flow_gt) ** 2, dim=0).sqrt()
 
         epe = epe.flatten()
-        val = (valid_gt.flatten() >= 0.5) & (flow_gt.abs().flatten() < 192)
+        val = (valid_gt.flatten() >= 0.5) & (flow_gt.abs().flatten() < 192) & (torch.isnan(flow_pr.flatten()) == 0)
 
         out = epe > 1.0
         epe_list.append(epe[val].mean().item())
@@ -212,7 +212,7 @@ def validate_middlebury(model, split="F", mixed_prec=False):
         image1 = image1[None].cuda()
         image2 = image2[None].cuda()
 
-        padder = InputPadder(image1.shape, divis_by=32)
+        padder = InputPadder(image1.shape, divis_by=64)
         image1, image2 = padder.pad(image1, image2)
 
         with autocast(enabled=mixed_prec):
@@ -225,7 +225,7 @@ def validate_middlebury(model, split="F", mixed_prec=False):
         epe = torch.sum((flow_pr - flow_gt) ** 2, dim=0).sqrt()
 
         epe_flattened = epe.flatten()
-        val = (valid_gt.reshape(-1) >= -0.5) & (flow_gt[0].reshape(-1) > -1000)
+        val = (valid_gt.reshape(-1) >= -0.5) & (flow_gt[0].reshape(-1) > -1000) & (torch.isnan(flow_pr.flatten()) == 0)
 
         out_0_5 = epe_flattened > 0.5
         out_1_0 = epe_flattened > 1.0
