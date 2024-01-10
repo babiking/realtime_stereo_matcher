@@ -189,17 +189,17 @@ class UpsampleBlock(nn.Module):
 def make_correlation_volume(l_fmap, r_fmap, max_disp):
     n, c, h, w = l_fmap.shape
 
-    corr_volume = -1.0 * torch.ones(
+    corr_volume = torch.zeros(
         size=[n, max_disp, h, w], dtype=l_fmap.dtype, device=r_fmap.device
     )
 
     for d in range(max_disp):
         if d == 0:
-            corr_volume[:, 0, :, :] = F.cosine_similarity(l_fmap, r_fmap, dim=1)
+            corr_volume[:, 0, :, :] = (l_fmap * r_fmap).mean(dim=1)
         else:
-            corr_volume[:, d, :, d:] = F.cosine_similarity(
-                l_fmap[:, :, :, d:], r_fmap[:, :, :, :-d], dim=1
-            )
+            corr_volume[:, d, :, d:] = (
+                l_fmap[:, :, :, d:] * r_fmap[:, :, :, :-d]
+            ).mean(dim=1)
 
     # corr_volume: 1 x 40 x 60 x 80
     corr_volume = corr_volume.contiguous()
