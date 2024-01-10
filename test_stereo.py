@@ -16,11 +16,13 @@ from tools.colorize import colorize_2d_matrix
 import gflags
 
 gflags.DEFINE_string(
-    "exp_config_json", "configure/stereo_net_config_v3.json", "experiment configure json file"
+    "exp_config_json",
+    "configure/disp_net_c_config.json",
+    "experiment configure json file",
 )
 gflags.DEFINE_string(
     "model_chkpt_file",
-    "experiments/200K_STEREO_NET_V3/checkpoints/200K_STEREO_NET_V3-epoch-200000.pth.gz",
+    "experiments/BASE_DISP_NET_C/checkpoints/BASE_DISP_NET_C-epoch-100000.pth.gz",
     "model checkpont file",
 )
 gflags.DEFINE_string("name", "D435I", "data name")
@@ -87,7 +89,9 @@ def main():
     image1 = image1[None].cuda()
     image2 = image2[None].cuda()
 
-    padder = InputPadder(image1.shape, divis_by=32)
+    padder = InputPadder(
+        image1.shape, divis_by=2 ** exp_config["model"].get("downsample_factor", 6)
+    )
     image1, image2 = padder.pad(image1, image2)
 
     with autocast(enabled=use_mixed_precision):
@@ -102,14 +106,16 @@ def main():
             n_macs, n_params = profile(model, inputs=(image1, image2))
             n_flops = FlopCountAnalysis(model, inputs=(image1, image2)).total()
 
-            print(f"#MACS: {n_macs / 1e9:.6f}G, #params: {n_params / 1e6:.6f}M, #flops: {n_flops / 1e9:.6f}G.")
+            print(
+                f"#MACS: {n_macs / 1e9:.6f}G, #params: {n_params / 1e6:.6f}M, #flops: {n_flops / 1e9:.6f}G."
+            )
         except:
             pass
 
     flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
 
-    flow_pr = -1.0 * np.squeeze(flow_pr.cpu().detach().numpy(), axis=0)
-    flow_color = colorize_2d_matrix(flow_pr, min_val=1.0, max_val=200.0)
+    flow_pr = -1.0 * np.squeeze(flow_pr.cpu().detach().numpy(), axis=0).astype(np.float32)
+    flow_color = colorize_2d_matrix(flow_pr, min_val=1.0, max_val=64.0)
 
     data_path = os.getcwd()
     data_name = FLAGS.name
@@ -118,7 +124,7 @@ def main():
     write_pfm_file(flow_pfm_file, np.flipud(flow_pr), 1.0)
 
     flow_color_file = os.path.join(data_path, f"{data_name}_colorize.png")
-    cv.imwrite(flow_color_file, flow_color[:, :, ::-1])
+    cv.imwrite(flow_color_file, flow_color)
 
 
 if __name__ == "__main__":
