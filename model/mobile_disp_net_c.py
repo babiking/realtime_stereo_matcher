@@ -1,76 +1,127 @@
-# MobileDispNetC implementation based on: https://github.com/HKBU-HPML/FADNet-PP
+# MobileDispNetC implementation based on: https://github.com/CVLAB-Unibo/Real-time-self-adaptive-deep-stereo
 
-from __future__ import print_function
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.init import kaiming_normal
 
 
-def conv(in_planes, out_planes, kernel_size=3, stride=1, batchNorm=False):
-    if batchNorm:
-        return nn.Sequential(
-            nn.Conv2d(
-                in_planes,
-                out_planes,
-                kernel_size=kernel_size,
-                stride=stride,
-                padding=(kernel_size - 1) // 2,
-                bias=False,
-            ),
-            nn.BatchNorm2d(out_planes),
-            nn.LeakyReLU(0.1, inplace=True),
-        )
-    else:
-        return nn.Sequential(
-            nn.Conv2d(
-                in_planes,
-                out_planes,
-                kernel_size=kernel_size,
-                stride=stride,
-                padding=(kernel_size - 1) // 2,
-                bias=True,
-            ),
-            nn.LeakyReLU(0.1, inplace=True),
-        )
+class Conv2dBlock(nn.Module):
+    def __init__(
+        self,
+        in_dim,
+        out_dim,
+        kernel_size=3,
+        stride=1,
+        with_batch_norm=True,
+        *args,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
 
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.with_batch_norm = with_batch_norm
 
-def build_corr(img_left, img_right, max_disp=40, zero_volume=None):
-    B, C, H, W = img_left.shape
-    if zero_volume is not None:
-        tmp_zero_volume = zero_volume  # * 0.0
-        # print('tmp_zero_volume: ', mean)
-        volume = tmp_zero_volume
-    else:
-        volume = img_left.new_zeros([B, max_disp, H, W])
-    for i in range(max_disp):
-        if (i > 0) and (i < W):
-            volume[:, i, :, i:] = (
-                img_left[:, :, :, i:] * img_right[:, :, :, : W - i]
-            ).mean(dim=1)
+        if with_batch_norm:
+            self.layer = nn.Sequential(
+                nn.Conv2d(
+                    in_dim,
+                    out_dim,
+                    kernel_size=kernel_size,
+                    stride=stride,
+                    padding=(kernel_size - 1) // 2,
+                    bias=False,
+                ),
+                nn.BatchNorm2d(out_dim),
+                nn.LeakyReLU(0.1, inplace=True),
+            )
         else:
-            volume[:, i, :, :] = (img_left[:, :, :, :] * img_right[:, :, :, :]).mean(
-                dim=1
+            self.layer = nn.Sequential(
+                nn.Conv2d(
+                    in_dim,
+                    out_dim,
+                    kernel_size=kernel_size,
+                    stride=stride,
+                    padding=(kernel_size - 1) // 2,
+                    bias=False,
+                ),
+                nn.LeakyReLU(0.1, inplace=True),
             )
 
-    # volume: 1 x 40 x 60 x 80
-    volume = volume.contiguous()
-    return volume
+    def forward(self, x):
+        return self.layer(x)
+
+
+class Conv2dTransposeBlock(nn.Module):
+    def __init__(
+        self,
+        in_dim,
+        out_dim,
+        kernel_size=3,
+        stride=1,
+        with_batch_norm=True,
+        *args,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.with_batch_norm = with_batch_norm
+
+        if with_batch_norm:
+            self.layer = nn.Sequential(
+                # H_out = (H_in - 1) * stride[0] - 2 * padding[0] + dilation[0] * (kernel_size[0] - 1) + output_padding[0] + 1
+                nn.ConvTranspose2d(
+                    in_dim,
+                    out_dim,
+                    kernel_size=kernel_size,
+                    stride=stride,
+                    padding=(kernel_size - 1) // 2,
+                    output_padding=stride - 1 - int(kernel_size % 2 == 0),
+                    bias=False,
+                    padding_mode="zeros",
+                ),
+                nn.BatchNorm2d(out_dim),
+                nn.LeakyReLU(0.1, inplace=True),
+            )
+        else:
+            self.layer = nn.Sequential(
+                nn.ConvTranspose2d(
+                    in_dim,
+                    out_dim,
+                    kernel_size=kernel_size,
+                    stride=stride,
+                    padding=(kernel_size - 1) // 2,
+                    output_padding=stride - 1 - int(kernel_size % 2 == 0),
+                    bias=False,
+                    padding_mode="zeros",
+                ),
+                nn.LeakyReLU(0.1, inplace=True),
+            )
+
+    def forward(self, x):
+        return self.layer(x)
 
 
 class ResBlock(nn.Module):
-    def __init__(self, n_in, n_out, stride=1):
+    def __init__(self, in_dim, out_dim, stride=1):
         super(ResBlock, self).__init__()
-        self.conv1 = nn.Conv2d(n_in, n_out, kernel_size=3, stride=stride, padding=1)
-        self.bn1 = nn.BatchNorm2d(n_out)
+        self.conv1 = nn.Conv2d(in_dim, out_dim, kernel_size=3, stride=stride, padding=1)
+        self.bn1 = nn.BatchNorm2d(out_dim)
         self.relu = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv2d(n_out, n_out, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm2d(n_out)
+        self.conv2 = nn.Conv2d(out_dim, out_dim, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(out_dim)
 
-        if stride != 1 or n_out != n_in:
+        if stride != 1 or out_dim != in_dim:
             self.shortcut = nn.Sequential(
-                nn.Conv2d(n_in, n_out, kernel_size=1, stride=stride),
-                nn.BatchNorm2d(n_out),
+                nn.Conv2d(in_dim, out_dim, kernel_size=1, stride=stride),
+                nn.BatchNorm2d(out_dim),
             )
         else:
             self.shortcut = None
@@ -90,113 +141,200 @@ class ResBlock(nn.Module):
         return out
 
 
-def predict_flow(in_planes, out_planes=1):
-    return nn.Conv2d(
-        in_planes, out_planes, kernel_size=3, stride=1, padding=1, bias=False
+class UpsampleBlock(nn.Module):
+    def __init__(
+        self, in_dim, skip_dim, out_dim, with_batch_norm, *args, **kwargs
+    ) -> None:
+        super().__init__(*args, **kwargs)
+
+        self.in_dim = in_dim
+        self.skip_dim = skip_dim
+        self.out_dim = out_dim
+        self.with_batch_norm = with_batch_norm
+
+        self.deconv = Conv2dTransposeBlock(
+            in_dim=in_dim,
+            out_dim=out_dim,
+            kernel_size=4,
+            stride=2,
+            with_batch_norm=with_batch_norm,
+        )
+        self.predict = nn.Conv2d(
+            in_dim, 1, kernel_size=3, stride=1, padding=1, bias=False
+        )
+        self.relu = nn.ReLU()
+        self.up_predict = nn.ConvTranspose2d(
+            1, 1, kernel_size=4, stride=2, padding=1, bias=False
+        )
+        self.concat = nn.Conv2d(
+            skip_dim + out_dim + 1,
+            out_dim,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=False,
+        )
+
+    def forward(self, bottom_feat, skip_connect_feat):
+        deconv_feat = self.deconv(bottom_feat)
+
+        disp_map = self.predict(bottom_feat)
+        disp_map_2x = self.up_predict(disp_map)
+
+        concat_feat = torch.concat((skip_connect_feat, deconv_feat, disp_map_2x), dim=1)
+        concat_feat = self.concat(concat_feat)
+        return self.relu(disp_map), concat_feat
+
+
+def make_correlation_volume(l_fmap, r_fmap, max_disp):
+    n, c, h, w = l_fmap.shape
+
+    corr_volume = -1.0 * torch.ones(
+        size=[n, max_disp, h, w], dtype=l_fmap.dtype, device=r_fmap.device
     )
 
+    for d in range(max_disp):
+        if d == 0:
+            corr_volume[:, 0, :, :] = F.cosine_similarity(l_fmap, r_fmap, dim=1)
+        else:
+            corr_volume[:, d, :, d:] = F.cosine_similarity(
+                l_fmap[:, :, :, d:], r_fmap[:, :, :, :-d], dim=1
+            )
 
-def deconv(in_planes, out_planes):
-    return nn.Sequential(
-        nn.ConvTranspose2d(
-            in_planes, out_planes, kernel_size=4, stride=2, padding=1, bias=False
-        ),
-        nn.LeakyReLU(0.1, inplace=True),
-    )
+    # corr_volume: 1 x 40 x 60 x 80
+    corr_volume = corr_volume.contiguous()
+    return corr_volume
 
 
-def disparity_regression(x, maxdisp):
-    assert len(x.shape) == 4
-    disp_values = torch.arange(0, maxdisp, dtype=x.dtype, device=x.device)
-    disp_values = disp_values.view(1, maxdisp, 1, 1)
-    return torch.sum(x * disp_values, 1, keepdim=False)
+def disparity_regression(corr_volume, max_disp):
+    assert len(corr_volume.shape) == 4, f"#dimensions of correlation volume != 4."
+    assert (
+        corr_volume.shape[1] == max_disp
+    ), f"#channels of correlation volume != max_disparity ({max_disp})."
+
+    disp_values = torch.arange(
+        0, max_disp, dtype=corr_volume.dtype, device=corr_volume.device
+    ).view([1, max_disp, 1, 1])
+
+    corr_values = F.softmax(corr_volume, dim=1)
+    corr_values = torch.sum(corr_values * disp_values, dim=1, keepdim=True)
+    return corr_values
+
+
+def disparity_interpolate(disp, shape):
+    n, _, src_h, src_w = disp.shape
+
+    dst_h, dst_w = shape
+
+    if src_h != dst_h or src_w != dst_w:
+        scale = float(dst_w) / src_w
+
+        disp = F.interpolate(
+            disp * scale, (dst_h, dst_w), mode="bilinear", align_corners=False
+        )
+    return disp
 
 
 class MobileDispNetC(nn.Module):
-    def __init__(
-        self,
-        batchNorm=False,
-        lastRelu=True,
-        resBlock=True,
-        maxdisp=-1,
-        input_channel=3,
-        get_features=False,
-        input_img_shape=None,
-    ):
+    def __init__(self, hidden_dim=32, max_disp=192, with_batch_norm=True):
         super(MobileDispNetC, self).__init__()
 
-        self.batchNorm = batchNorm
-        self.input_channel = input_channel
-        self.maxdisp = maxdisp
-        self.get_features = get_features
-        self.relu = nn.ReLU(inplace=False)
-        self.corr_max_disp = 40
-        if input_img_shape is not None:
-            self.corr_zero_volume = torch.zeros(
-                input_img_shape, dtype=torch.float32
-            ).cuda()
-        else:
-            self.corr_zero_volume = None
+        self.down_factor = 6
+        self.hidden_dim = hidden_dim
+        self.max_disp = max_disp
+        self.with_batch_norm = with_batch_norm
 
-        # shrink and extract features
-        self.conv1 = conv(self.input_channel, 64, 7, 2)
-        if resBlock:
-            self.conv2 = ResBlock(64, 128, stride=2)
-            self.conv3 = ResBlock(128, 256, stride=2)
-            self.conv_redir = ResBlock(256, 32, stride=1)
-        else:
-            self.conv2 = conv(64, 128, stride=2)
-            self.conv3 = conv(128, 256, stride=2)
-            self.conv_redir = conv(256, 32, stride=1)
-        self.corr_activation = nn.LeakyReLU(0.1, inplace=True)
-        if resBlock:
-            self.conv3_1 = ResBlock(72, 128)
-            self.conv4 = ResBlock(128, 256, stride=2)
-            self.conv5 = ResBlock(256, 512, stride=2)
-            self.conv6 = ResBlock(512, 512, stride=2)
-        else:
-            self.conv3_1 = conv(72, 128)
-            self.conv4 = conv(128, 256, stride=2)
-            self.conv5 = conv(256, 512, stride=2)
-            self.conv6 = conv(512, 512, stride=2)
+        self.conv1 = Conv2dBlock(
+            in_dim=3,
+            out_dim=hidden_dim * (2**0),
+            kernel_size=7,
+            stride=2,
+            with_batch_norm=with_batch_norm,
+        )
+        self.conv2 = Conv2dBlock(
+            in_dim=hidden_dim * (2**0),
+            out_dim=hidden_dim * (2**1),
+            kernel_size=5,
+            stride=2,
+            with_batch_norm=with_batch_norm,
+        )
 
-        self.pred_flow6 = predict_flow(512)
+        self.conv_redir = Conv2dBlock(
+            in_dim=hidden_dim * (2**1),
+            out_dim=hidden_dim * (2**0),
+            kernel_size=1,
+            stride=1,
+            with_batch_norm=with_batch_norm,
+        )
 
-        # iconv with deconv
-        self.iconv5 = nn.ConvTranspose2d(512 + 256 + 1, 256, 3, 1, 1)
-        self.iconv4 = nn.ConvTranspose2d(256 + 128 + 1, 128, 3, 1, 1)
-        self.iconv3 = nn.ConvTranspose2d(128 + 64 + 1, 64, 3, 1, 1)
-        self.iconv2 = nn.ConvTranspose2d(128 + 32 + 1, 32, 3, 1, 1)
-        self.iconv1 = nn.ConvTranspose2d(64 + 16 + 1, 16, 3, 1, 1)
-        self.iconv0 = nn.ConvTranspose2d(17 + self.input_channel, 16, 3, 1, 1)
+        self.conv3 = nn.Sequential(
+            Conv2dBlock(
+                in_dim=hidden_dim * (2**0) + (self.max_disp // 4),
+                out_dim=hidden_dim * (2**2),
+                kernel_size=5,
+                stride=2,
+                with_batch_norm=with_batch_norm,
+            ),
+            Conv2dBlock(
+                in_dim=hidden_dim * (2**2),
+                out_dim=hidden_dim * (2**2),
+                kernel_size=3,
+                stride=1,
+                with_batch_norm=False,
+            ),
+        )
+        self.res4 = ResBlock(hidden_dim * (2**2), hidden_dim * (2**3), stride=2)
+        self.res5 = ResBlock(hidden_dim * (2**3), hidden_dim * (2**4), stride=2)
+        self.res6 = ResBlock(hidden_dim * (2**4), hidden_dim * (2**5), stride=2)
 
-        # expand and produce disparity
-        self.upconv5 = deconv(512, 256)
-        self.upflow6to5 = nn.ConvTranspose2d(1, 1, 4, 2, 1, bias=False)
-        self.pred_flow5 = predict_flow(256)
+        self.up5 = UpsampleBlock(
+            in_dim=hidden_dim * (2**5),
+            skip_dim=hidden_dim * (2**4),
+            out_dim=hidden_dim * (2**4),
+            with_batch_norm=with_batch_norm,
+        )
+        self.up4 = UpsampleBlock(
+            in_dim=hidden_dim * (2**4),
+            skip_dim=hidden_dim * (2**3),
+            out_dim=hidden_dim * (2**3),
+            with_batch_norm=with_batch_norm,
+        )
+        self.up3 = UpsampleBlock(
+            in_dim=hidden_dim * (2**3),
+            skip_dim=hidden_dim * (2**2),
+            out_dim=hidden_dim * (2**2),
+            with_batch_norm=with_batch_norm,
+        )
+        self.up2 = UpsampleBlock(
+            in_dim=hidden_dim * (2**2),
+            skip_dim=hidden_dim * (2**1),
+            out_dim=hidden_dim * (2**1),
+            with_batch_norm=with_batch_norm,
+        )
+        self.up1 = UpsampleBlock(
+            in_dim=hidden_dim * (2**1),
+            skip_dim=hidden_dim * (2**0),
+            out_dim=hidden_dim * (2**0),
+            with_batch_norm=with_batch_norm,
+        )
+        self.up0 = UpsampleBlock(
+            in_dim=hidden_dim * (2**0),
+            skip_dim=3,
+            out_dim=hidden_dim,
+            with_batch_norm=with_batch_norm,
+        )
 
-        self.upconv4 = deconv(256, 128)
-        self.upflow5to4 = nn.ConvTranspose2d(1, 1, 4, 2, 1, bias=False)
-        self.pred_flow4 = predict_flow(128)
-
-        self.upconv3 = deconv(128, 64)
-        self.upflow4to3 = nn.ConvTranspose2d(1, 1, 4, 2, 1, bias=False)
-        self.pred_flow3 = predict_flow(64)
-
-        self.upconv2 = deconv(64, 32)
-        self.upflow3to2 = nn.ConvTranspose2d(1, 1, 4, 2, 1, bias=False)
-        self.pred_flow2 = predict_flow(32)
-
-        self.upconv1 = deconv(32, 16)
-        self.upflow2to1 = nn.ConvTranspose2d(1, 1, 4, 2, 1, bias=False)
-        self.pred_flow1 = predict_flow(16)
-
-        self.upconv0 = deconv(16, 16)
-        self.upflow1to0 = nn.ConvTranspose2d(1, 1, 4, 2, 1, bias=False)
-        if self.maxdisp == -1:
-            self.pred_flow0 = predict_flow(16)
-        else:
-            self.disp_expand = ResBlock(16, self.maxdisp)
+        self.corr_expand = nn.Sequential(
+            ResBlock(hidden_dim, hidden_dim, stride=1),
+            nn.Conv2d(
+                hidden_dim,
+                self.max_disp,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=False,
+            ),
+        )
 
         # weight initialization
         for m in self.modules():
@@ -211,136 +349,86 @@ class MobileDispNetC(nn.Module):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
 
-        # self.freeze()
+    def forward(self, l_img, r_img):
+        # l_img: 1 x 3 x 480 x 640
+        l_img = (2.0 * (l_img / 255.0) - 1.0).contiguous()
+        r_img = (2.0 * (r_img / 255.0) - 1.0).contiguous()
 
-    def forward(self, img_left, img_right):
-        # img_left: 1 x 3 x 480 x 640
-        img_left = (2.0 * (img_left / 255.0) - 1.0).contiguous()
-        img_right = (2.0 * (img_right / 255.0) - 1.0).contiguous()
+        n, c, h, w = l_img.size()
 
-        # conv1_l: 1 x 64 x 240 x 320
-        conv1_l = self.conv1(img_left)  # 3-64
-        # conv2_l: 1 x 128 x 120 x 160
-        conv2_l = self.conv2(conv1_l)  # 64-128
-        # conv3a_l: 1 x 256 x 60 x 80
-        conv3a_l = self.conv3(conv2_l)  # 128-256
+        align = 2**self.down_factor
 
-        # conv1_r: 1 x 64 x 240 x 320
-        conv1_r = self.conv1(img_right)
-        # conv2_r: 1 x 128 x 120 x 160
-        conv2_r = self.conv2(conv1_r)
-        # conv3a_r: 1 x 256 x 60 x 80
-        conv3a_r = self.conv3(conv2_r)
+        w_pad = (align - (w % align)) % align
+        h_pad = (align - (h % align)) % align
 
-        # Correlate corr3a_l and corr3a_r
-        # out_corr = self.corr(conv3a_l, conv3a_r)
-        # print('shape: ', conv3a_l.shape)
+        # l_img: 1 x 3 x 480 x 640
+        l_img = F.pad(l_img, (0, w_pad, 0, h_pad))
+        r_img = F.pad(r_img, (0, w_pad, 0, h_pad))
 
-        # out_corr: 1 x 40 x 60 x 80
-        out_corr = build_corr(
-            conv3a_l,
-            conv3a_r,
-            max_disp=self.corr_max_disp,
-            zero_volume=self.corr_zero_volume,
+        # conv1: 1 x C x 240 x 320
+        l_conv1 = self.conv1(l_img)
+        r_conv1 = self.conv1(r_img)
+
+        # conv2: 1 x 2C x 120 x 160
+        l_conv2 = self.conv2(l_conv1)
+        r_conv2 = self.conv2(r_conv1)
+
+        # conv_redir: 1 x C x 120 x 160
+        l_conv_redir = self.conv_redir(l_conv2)
+
+        # corr_volume: 1 x MAX_DISP x 120 x 160
+        corr_volume = make_correlation_volume(
+            l_conv2, r_conv2, max_disp=(self.max_disp // 4)
         )
-        out_corr = self.corr_activation(out_corr)
 
-        # out_conv3a_redir: 1 x 32 x 60 x 80
-        out_conv3a_redir = self.conv_redir(conv3a_l)  # 256-32
-        # in_conv3d: 1 x 72 x 60 x 80
-        in_conv3b = torch.cat((out_conv3a_redir, out_corr), 1)  # 32+40
+        in_conv3 = torch.concat((l_conv_redir, corr_volume), dim=1)
 
-        # conv3b: 1 x 128 x 60 x 80
-        conv3b = self.conv3_1(in_conv3b)  # 72-128
-        # conv4a: 1 x 256 x 30 x 40
-        conv4a = self.conv4(conv3b)  # 128-256
-        # conv5a: 1 x 512 x 15 x 20
-        conv5a = self.conv5(conv4a)  # 256-512
-        # conv6a: 1 x 512 x 8 x 10
-        conv6a = self.conv6(conv5a)  # 512-512
+        # conv3: 1 x 4C x 60 x 80
+        out_conv3 = self.conv3(in_conv3)
 
-        # pr6: 1 x 1 x 8 x 10
-        pr6 = self.pred_flow6(conv6a)  # 512-1
-        # upconv5: 1 x 256 x 16 x 20
-        upconv5 = self.upconv5(conv6a)  # 512-256
-        # upflow6: 1 x 1 x 16 x 20
-        upflow6 = self.upflow6to5(pr6)  # 1-1
+        # res4: 1 x 8C x 30 x 40
+        out_res4 = self.res4(out_conv3)
 
-        # concat5: 1 x (256 + 1 + 512) x 16 x 20
-        concat5 = torch.cat((upconv5, upflow6, conv5a), 1)
-        # iconv5: 1 x 256 x 15 x 20
-        iconv5 = self.iconv5(concat5)  # 256+1+512-256
+        # res5: 1 x 16C x 15 x 20
+        out_res5 = self.res5(out_res4)
 
-        # pr5: 1 x 1 x 15 x 20
-        pr5 = self.pred_flow5(iconv5)  # 256-1
-        # upconv4: 1 x 128 x 30 x 40
-        upconv4 = self.upconv4(iconv5)  # 256-128
-        # upflow5: 1 x 1 x 30 x 40
-        upflow5 = self.upflow5to4(pr5)  # 1-1
-        # concat4: 1 x (128 + 1 + 256) x 30 x 40
-        concat4 = torch.cat((upconv4, upflow5, conv4a), 1)
-        # iconv4: 1 x 128 x 30 x 40
-        iconv4 = self.iconv4(concat4)  # 128+1+256-128
+        # res6: 1 x 32C x 7 x 10
+        out_res6 = self.res6(out_res5)
 
-        # pr4: 1 x 1 x 30 x 40
-        pr4 = self.pred_flow4(iconv4)  # 128-1
-        upconv3 = self.upconv3(iconv4)  # 128-64
-        upflow4 = self.upflow4to3(pr4)  # 1-1
-        concat3 = torch.cat((upconv3, upflow4, conv3b), 1)
-        iconv3 = self.iconv3(concat3)  # 64+1+128-64
+        # disp06: 1 x 1 x 7 x 10
+        # concat_up5: 1 x 16C x 15 x 20
+        disp06, concat_up5 = self.up5(out_res6, out_res5)
 
-        # pr3: 1 x 1 x 60 x 80
-        pr3 = self.pred_flow3(iconv3)  # 64-1
-        upconv2 = self.upconv2(iconv3)  # 64-32
-        upflow3 = self.upflow3to2(pr3)  # 1-1
-        concat2 = torch.cat((upconv2, upflow3, conv2_l), 1)
-        iconv2 = self.iconv2(concat2)  # 32+1+128, 32
+        # disp05: 1 x 1 x 15 x 20
+        # concat_up4: 1 x 8C x 30 x 40
+        disp05, concat_up4 = self.up4(concat_up5, out_res4)
 
-        # pr2: 1 x 1 x 120 x 160
-        pr2 = self.pred_flow2(iconv2)  # 32-1
-        upconv1 = self.upconv1(iconv2)  # 32-16
-        upflow2 = self.upflow2to1(pr2)  # 1-1
-        concat1 = torch.cat((upconv1, upflow2, conv1_l), 1)
-        iconv1 = self.iconv1(concat1)  # 16+1+64-16
+        # disp04: 1 x 1 x 30 x 40
+        # concat_up3: 1 x 4C x 60 x 80
+        disp04, concat_up3 = self.up3(concat_up4, out_conv3)
 
-        # pr1: 1 x 1 x 240 x 320
-        pr1 = self.pred_flow1(iconv1)  # 16-1
-        upconv0 = self.upconv0(iconv1)  # 16-16
-        upflow1 = self.upflow1to0(pr1)  # 1-1
-        concat0 = torch.cat((upconv0, upflow1, img_left), 1)
-        iconv0 = self.iconv0(concat0)  # 16+1+3-16
+        # disp03: 1 x 1 x 60 x 80
+        # concat_up2: 1 x 2C x 120 x 160
+        disp03, concat_up2 = self.up2(concat_up3, l_conv2)
 
-        # predict flow
-        # pr1: 1 x 1 x 480 x 640
-        if self.maxdisp == -1:
-            pr0 = self.pred_flow0(iconv0)
-            pr0 = self.relu(pr0)
-        else:
-            pr0 = self.disp_expand(iconv0)
-            pr0 = F.softmax(pr0, dim=1)
-            pr0 = disparity_regression(pr0, self.maxdisp)
+        # disp02: 1 x 1 x 120 x 160
+        # concat_up1: 1 x C x 240 x 320
+        disp02, concat_up1 = self.up1(concat_up2, l_conv1)
 
-        disps = [pr6, pr5, pr4, pr3, pr2, pr1, pr0]
-        disps = [-1.0 * self.resize_disparity_map(x, img_left.shape[2:]) for x in disps]
+        # disp01: 1 x 1 x 240 x 320
+        # concat_up0: 1 x C x 480 x 640
+        disp01, concat_up0 = self.up0(concat_up1, l_img)
 
-        # can be chosen outside
-        if self.get_features:
-            features = (iconv5, iconv4, iconv3, iconv2, iconv1, iconv0)
-            return disps, features
-        else:
-            return disps
+        corr_volume0 = self.corr_expand(concat_up0)
 
-    def resize_disparity_map(self, disp, shape):
-        n, _, src_h, src_w = disp.shape
+        disp00 = disparity_regression(corr_volume0, self.max_disp)
 
-        dst_h, dst_w = shape
-
-        scale = float(dst_w) / src_w
-
-        disp = F.interpolate(
-            disp * scale, (dst_h, dst_w), mode="bilinear", align_corners=False
-        )
-        return disp
+        multi_scale = [disp06, disp05, disp04, disp03, disp02, disp01, disp00]
+        multi_scale = [
+            -1.0 * disparity_interpolate(disp, l_img.shape[2:])[:, :, :h, :w]
+            for disp in multi_scale
+        ]
+        return multi_scale
 
     def freeze(self):
         for name, param in self.named_parameters():

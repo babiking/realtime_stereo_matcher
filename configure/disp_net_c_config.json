@@ -25,12 +25,9 @@
     "model": {
         "type": "MobileDispNetC",
         "parameters": {
-            "batchNorm": false,
-            "lastRelu": true,
-            "resBlock": true,
-            "maxdisp": -1,
-            "input_channel": 3,
-            "get_features": false
+            "hidden_dim": 8,
+            "max_disp": 192,
+            "with_batch_norm": true
         },
         "downsample_factor": 6
     },
