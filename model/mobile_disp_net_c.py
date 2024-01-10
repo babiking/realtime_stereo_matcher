@@ -162,7 +162,6 @@ class UpsampleBlock(nn.Module):
         self.predict = nn.Conv2d(
             in_dim, 1, kernel_size=3, stride=1, padding=1, bias=False
         )
-        self.relu = nn.ReLU()
         self.up_predict = nn.ConvTranspose2d(
             1, 1, kernel_size=4, stride=2, padding=1, bias=False
         )
@@ -183,7 +182,7 @@ class UpsampleBlock(nn.Module):
 
         concat_feat = torch.concat((skip_connect_feat, deconv_feat, disp_map_2x), dim=1)
         concat_feat = self.concat(concat_feat)
-        return self.relu(disp_map), concat_feat
+        return disp_map, concat_feat
 
 
 def make_correlation_volume(l_fmap, r_fmap, max_disp):
@@ -317,23 +316,9 @@ class MobileDispNetC(nn.Module):
             out_dim=hidden_dim * (2**0),
             with_batch_norm=with_batch_norm,
         )
-        self.up0 = UpsampleBlock(
-            in_dim=hidden_dim * (2**0),
-            skip_dim=3,
-            out_dim=hidden_dim,
-            with_batch_norm=with_batch_norm,
-        )
 
-        self.corr_expand = nn.Sequential(
-            ResBlock(hidden_dim, hidden_dim, stride=1),
-            nn.Conv2d(
-                hidden_dim,
-                self.max_disp,
-                kernel_size=3,
-                stride=1,
-                padding=1,
-                bias=False,
-            ),
+        self.predict = nn.Conv2d(
+            hidden_dim, 1, kernel_size=3, stride=1, padding=1, bias=False
         )
 
         # weight initialization
@@ -417,13 +402,9 @@ class MobileDispNetC(nn.Module):
 
         # disp01: 1 x 1 x 240 x 320
         # concat_up0: 1 x C x 480 x 640
-        disp01, concat_up0 = self.up0(concat_up1, l_img)
+        disp01 = self.predict(concat_up1)
 
-        corr_volume0 = self.corr_expand(concat_up0)
-
-        disp00 = disparity_regression(corr_volume0, self.max_disp)
-
-        multi_scale = [disp06, disp05, disp04, disp03, disp02, disp01, disp00]
+        multi_scale = [disp06, disp05, disp04, disp03, disp02, disp01]
         multi_scale = [
             -1.0 * disparity_interpolate(disp, l_img.shape[2:])[:, :, :h, :w]
             for disp in multi_scale
