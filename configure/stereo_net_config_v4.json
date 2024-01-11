@@ -13,12 +13,12 @@
             "kitti"
         ],
         "learn_rate": 0.0002,
-        "num_of_steps": 120000,
+        "num_of_steps": 200000,
         "weight_decay": 0.00001,
         "loss": {
             "type": "SequenceLoss",
             "parameters": {
-                "loss_gamma": 0.9,
+                "loss_gamma": 0.7,
                 "max_flow_magnitude": 700
             }
         }
