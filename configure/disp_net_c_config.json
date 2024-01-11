@@ -14,7 +14,14 @@
         ],
         "learn_rate": 0.0002,
         "num_of_steps": 100000,
-        "weight_decay": 0.00001
+        "weight_decay": 0.00001,
+        "loss": {
+            "type": "SequenceLoss",
+            "parameters": {
+                "loss_gamma": 0.9,
+                "max_flow_magnitude": 700
+            }
+        }
     },
     "test": {
         "datasets": [
