@@ -1,0 +1,55 @@
+{
+    "name": "BASE_STEREO_NET_V4",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/BASE_STEREO_NET_V4",
+    "train": {
+        "batch_size": 6,
+        "restore_checkpoint": "",
+        "save_checkpoint_frequency": 10000,
+        "datasets": [
+            "middlebury_2014",
+            "eth3d",
+            "sceneflow/things",
+            "sceneflow/driving",
+            "kitti"
+        ],
+        "learn_rate": 0.0002,
+        "num_of_steps": 120000,
+        "weight_decay": 0.00001,
+        "loss": {
+            "type": "SequenceLoss",
+            "parameters": {
+                "loss_gamma": 0.9,
+                "max_flow_magnitude": 700
+            }
+        }
+    },
+    "test": {
+        "datasets": [
+            "middlebury_Q",
+            "eth3d"
+        ]
+    },
+    "model": {
+        "type": "MobileStereoNetV4",
+        "parameters": {
+            "max_disp": 192
+        }
+    },
+    "data": {
+        "image_size": [
+            240,
+            320
+        ],
+        "image_gamma": [],
+        "spatial_scale": [
+            -0.2,
+            0.4
+        ],
+        "saturation_range": [
+            0,
+            1.4
+        ],
+        "do_flip": false,
+        "no_y_jitter": false
+    }
+}
