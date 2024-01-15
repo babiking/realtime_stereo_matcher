@@ -1,0 +1,25 @@
+{
+    "name": "OPENCV_SGBM_MODULE",
+    "model": {
+        "type": "OpenCVSGBMModule",
+        "parameters": {
+            "block_size": 5,
+            "pre_filter_cap": 63,
+            "min_disp": 0,
+            "num_of_disps": 128,
+            "speckle_range": 5,
+            "speckle_win_size": 164,
+            "disp12_max_diff": 1,
+            "uniqueness_ratio": 15,
+            "mode": 1,
+            "p1": 256,
+            "p2": 240
+        }
+    },
+    "test": {
+        "datasets": [
+            "middlebury_Q",
+            "eth3d"
+        ]
+    }
+}

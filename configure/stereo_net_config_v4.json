@@ -1,8 +1,8 @@
 {
-    "name": "WARP_STEREO_NET_V2",
-    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/WARP_STEREO_NET_V2",
+    "name": "BASE_STEREO_NET_V4",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/BASE_STEREO_NET_V4",
     "train": {
-        "batch_size": 8,
+        "batch_size": 6,
         "restore_checkpoint": "",
         "save_checkpoint_frequency": 10000,
         "datasets": [
@@ -13,12 +13,12 @@
             "kitti"
         ],
         "learn_rate": 0.0002,
-        "num_of_steps": 100000,
+        "num_of_steps": 200000,
         "weight_decay": 0.00001,
         "loss": {
             "type": "SequenceLoss",
             "parameters": {
-                "loss_gamma": 0.9,
+                "loss_gamma": 0.7,
                 "max_flow_magnitude": 700
             }
         }
@@ -30,20 +30,9 @@
         ]
     },
     "model": {
-        "type": "MobileStereoNetV2",
+        "type": "MobileStereoNetV4",
         "parameters": {
-            "down_factor": 3,
-            "max_disp": 192,
-            "refine_dim": 7,
-            "refine_dilates": [
-                1,
-                2,
-                4,
-                8,
-                1,
-                1
-            ],
-            "hidden_dim": 32
+            "max_disp": 192
         }
     },
     "data": {

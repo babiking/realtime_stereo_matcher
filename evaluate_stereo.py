@@ -13,12 +13,12 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/disp_net_c_config.json",
+    "configure/opencv_sgbm_config.json",
     "experiment configure json file",
 )
 gflags.DEFINE_string(
     "model_chkpt_file",
-    "experiments/BASE_DISP_NET_C/checkpoints/BASE_DISP_NET_C-epoch-100000.pth.gz",
+    "experiments/BASE_STEREO_NET_V4/checkpoints/BASE_STEREO_NET_V4-epoch-200000.pth.gz",
     "model checkpont file",
 )
 
@@ -54,7 +54,11 @@ def validate_eth3d(model, mixed_prec=False):
         epe = torch.sum((flow_pr - flow_gt) ** 2, dim=0).sqrt()
 
         epe_flattened = epe.flatten()
-        val = (valid_gt.flatten() >= 0.5) & (torch.isnan(flow_pr.flatten()) == 0)
+        val = (
+            (valid_gt.flatten() >= 0.5)
+            & (torch.isnan(flow_pr.flatten()) == 0)
+            & (flow_pr.flatten() < 0.0)
+        )
         out_0_5 = epe_flattened > 0.5
         out_1_0 = epe_flattened > 1.0
         out_3_0 = epe_flattened > 3.0
@@ -128,7 +132,11 @@ def validate_kitti(model, mixed_prec=False):
         epe = torch.sum((flow_pr - flow_gt) ** 2, dim=0).sqrt()
 
         epe_flattened = epe.flatten()
-        val = (valid_gt.flatten() >= 0.5) & (torch.isnan(flow_pr.flatten()) == 0)
+        val = (
+            (valid_gt.flatten() >= 0.5)
+            & (torch.isnan(flow_pr.flatten()) == 0)
+            & (flow_pr.flatten() < 0.0)
+        )
 
         out = epe_flattened > 1.0
         image_out = out[val].float().mean().item()
@@ -180,7 +188,12 @@ def validate_things(model, mixed_prec=False):
         epe = torch.sum((flow_pr - flow_gt) ** 2, dim=0).sqrt()
 
         epe = epe.flatten()
-        val = (valid_gt.flatten() >= 0.5) & (flow_gt.abs().flatten() < 192) & (torch.isnan(flow_pr.flatten()) == 0)
+        val = (
+            (valid_gt.flatten() >= 0.5)
+            & (flow_gt.abs().flatten() < 192)
+            & (torch.isnan(flow_pr.flatten()) == 0)
+            & (flow_pr.flatten() < 0.0)
+        )
 
         out = epe > 1.0
         epe_list.append(epe[val].mean().item())
@@ -225,7 +238,12 @@ def validate_middlebury(model, split="F", mixed_prec=False):
         epe = torch.sum((flow_pr - flow_gt) ** 2, dim=0).sqrt()
 
         epe_flattened = epe.flatten()
-        val = (valid_gt.reshape(-1) >= -0.5) & (flow_gt[0].reshape(-1) > -1000) & (torch.isnan(flow_pr.flatten()) == 0)
+        val = (
+            (valid_gt.reshape(-1) >= -0.5)
+            & (flow_gt[0].reshape(-1) > -1000)
+            & (torch.isnan(flow_pr.flatten()) == 0)
+            & (flow_pr.flatten() < 0.0)
+        )
 
         out_0_5 = epe_flattened > 0.5
         out_1_0 = epe_flattened > 1.0
@@ -286,17 +304,15 @@ def main():
     model.cuda()
     model.eval()
 
-    assert FLAGS.model_chkpt_file.endswith(".pth") or FLAGS.model_chkpt_file.endswith(
-        ".pth.gz"
-    )
-    logging.info(f"Loading checkpoint: {FLAGS.model_chkpt_file}...")
-    checkpoint = torch.load(FLAGS.model_chkpt_file)
-    model.load_state_dict(checkpoint, strict=True)
-    logging.info(f"Done loading checkpoint.")
+    if "train" in exp_config:
+        logging.info(f"Loading checkpoint: {FLAGS.model_chkpt_file}...")
+        checkpoint = torch.load(FLAGS.model_chkpt_file)
+        model.load_state_dict(checkpoint, strict=True)
+        logging.info(f"Done loading checkpoint.")
 
-    print(
-        f"The model has {format(count_parameters(model)/1e6, '.4f')}M learnable parameters."
-    )
+        print(
+            f"The model has {format(count_parameters(model)/1e6, '.4f')}M learnable parameters."
+        )
 
     # The CUDA implementations of the correlation volume prevent half-precision
     # rounding errors in the correlation lookup. This allows us to use mixed precision

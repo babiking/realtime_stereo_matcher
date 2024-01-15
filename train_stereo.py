@@ -12,6 +12,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from model import build_model
+from loss import build_loss_function
+from loss.loss import get_flow_map_metrics
 import dataset.stereo_datasets as datasets
 from torch.cuda.amp import GradScaler
 
@@ -20,60 +22,9 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/disp_net_c_config.json",
+    "configure/stereo_net_config_v4.json",
     "experiment configure json file",
 )
-
-
-def sequence_loss(flow_preds, flow_gt, valid, loss_gamma=0.99, max_flow=700):
-    """Loss function defined over sequence of flow predictions"""
-
-    n_predictions = len(flow_preds)
-    assert n_predictions >= 1
-    flow_loss = 0.0
-
-    # exlude invalid pixels and extremely large diplacements
-    mag = torch.sum(flow_gt**2, dim=1).sqrt()
-
-    # exclude extremly large displacements
-    valid = ((valid >= 0.5) & (mag < max_flow)).unsqueeze(1)
-    assert valid.shape == flow_gt.shape, [valid.shape, flow_gt.shape]
-    assert not torch.isinf(flow_gt[valid.bool()]).any()
-
-    for i in range(n_predictions):
-        assert (
-            not torch.isnan(flow_preds[i]).any()
-            and not torch.isinf(flow_preds[i]).any()
-        )
-
-        # We adjust the loss_gamma so it is consistent for any number of RAFT-Stereo iterations
-        adjusted_loss_gamma = loss_gamma ** (15 / (n_predictions - 1))
-        i_weight = adjusted_loss_gamma ** (n_predictions - i - 1)
-        i_loss = (flow_preds[i] - flow_gt).abs()
-        assert i_loss.shape == valid.shape, [
-            i_loss.shape,
-            valid.shape,
-            flow_gt.shape,
-            flow_preds[i].shape,
-        ]
-        flow_loss += i_weight * i_loss[valid.bool()].mean()
-
-    epe = torch.sum((flow_preds[-1] - flow_gt) ** 2, dim=1).sqrt()
-    epe = epe.view(-1)[valid.view(-1)]
-
-    flow_min = torch.min(flow_preds[-1][0])
-    flow_max = torch.max(flow_preds[-1][0])
-
-    metrics = {
-        "epe": epe.mean().item(),
-        "1px": (epe < 1).float().mean().item(),
-        "3px": (epe < 3).float().mean().item(),
-        "5px": (epe < 5).float().mean().item(),
-        "min": flow_min.float().item(),
-        "max": flow_max.float().item(),
-    }
-
-    return flow_loss, metrics
 
 
 def fetch_optimizer(exp_config, model):
@@ -188,6 +139,8 @@ def train(exp_config):
     model = nn.DataParallel(build_model(exp_config["model"]))
     logging.info(f"Model parameter count (pytorch): {count_parameters(model)}.")
 
+    loss_func = build_loss_function(exp_config["train"]["loss"])
+
     train_loader = datasets.fetch_dataloader(exp_config)
     optimizer, scheduler = fetch_optimizer(exp_config, model)
     total_steps = 0
@@ -217,7 +170,8 @@ def train(exp_config):
             flow_predictions = model(image1, image2)
             assert model.training
 
-            loss, metrics = sequence_loss(flow_predictions, flow, valid)
+            loss = loss_func(flow_predictions, flow, valid)
+            metrics = get_flow_map_metrics(flow, flow_predictions[-1], valid)
             logger.writer.add_scalar("live_loss", loss.item(), global_batch_num)
             logger.writer.add_scalar(
                 f"learning_rate", optimizer.param_groups[0]["lr"], global_batch_num
