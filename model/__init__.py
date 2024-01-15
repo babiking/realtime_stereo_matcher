@@ -3,6 +3,7 @@ from model.mobile_stereo_net_v2 import MobileStereoNetV2
 from model.mobile_stereo_net_v3 import MobileStereoNetV3
 from model.mobile_stereo_net_v4 import MobileStereoNetV4
 from model.mobile_disp_net_c import MobileDispNetC
+from model.opencv_sgbm_module import OpenCVSGBMModule
 
 
 def build_model(model_config):
@@ -16,5 +17,7 @@ def build_model(model_config):
         return MobileStereoNetV4(**model_config["parameters"])
     elif model_config["type"] == "MobileDispNetC":
         return MobileDispNetC(**model_config["parameters"])
+    elif model_config["type"] == "OpenCVSGBMModule":
+        return OpenCVSGBMModule(**model_config["parameters"])
     else:
         raise NotImplementedError("unsupport model: {}".format(model_config["type"]))

@@ -3,12 +3,11 @@ import os
 import sys
 import json
 import time
+import glob
 import logging
 import numpy as np
 import torch
 import cv2 as cv
-from thop import profile
-from fvcore.nn import FlopCountAnalysis, parameter_count_table
 from model import build_model
 from dataset.input_padder import InputPadder
 from tools.pfm_file_io import write_pfm_file
@@ -17,7 +16,7 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/disp_net_c_config.json",
+    "configure/opencv_sgbm_config.json",
     "experiment configure json file",
 )
 gflags.DEFINE_string(
@@ -25,16 +24,20 @@ gflags.DEFINE_string(
     "experiments/BASE_DISP_NET_C/checkpoints/BASE_DISP_NET_C-epoch-100000.pth.gz",
     "model checkpont file",
 )
-gflags.DEFINE_string("name", "D435I", "data name")
 gflags.DEFINE_string(
     "left",
-    "/mnt/data/workspace/datasets/D435I/outdoor_stripe_plane/image/100cm_left_Img.bmp",
-    "left image file",
+    "/mnt/data/workspace/datasets/MiddleburyQBatch/image/*_left_Img.png",
+    "left images",
+)
+gflags.DEFINE_list(
+    "replace",
+    ["_left_Img", "_right_Img"],
+    "left to right image name replace",
 )
 gflags.DEFINE_string(
-    "right",
-    "/mnt/data/workspace/datasets/D435I/outdoor_stripe_plane/image/100cm_right_Img.bmp",
-    "right image file",
+    "output",
+    "/mnt/data/workspace/datasets/MiddleburyQBatch/disparity",
+    "output path",
 )
 
 
@@ -63,68 +66,74 @@ def main():
     model.cuda()
     model.eval()
 
-    logging.info(f"Loading checkpoint: {FLAGS.model_chkpt_file}...")
-    checkpoint = torch.load(FLAGS.model_chkpt_file)
-    model.load_state_dict(checkpoint, strict=True)
-    logging.info(f"Done loading checkpoint.")
+    if "train" in exp_config:
+        logging.info(f"Loading checkpoint: {FLAGS.model_chkpt_file}...")
+        checkpoint = torch.load(FLAGS.model_chkpt_file)
+        model.load_state_dict(checkpoint, strict=True)
+        logging.info(f"Done loading checkpoint.")
 
-    print(
-        f"The model has {format(count_parameters(model)/1e6, '.4f')}M learnable parameters."
-    )
+        print(
+            f"The model has {format(count_parameters(model)/1e6, '.4f')}M learnable parameters."
+        )
 
     # The CUDA implementations of the correlation volume prevent half-precision
     # rounding errors in the correlation lookup. This allows us to use mixed precision
     # in the entire forward pass, not just in the GRUs & feature extractors.
     use_mixed_precision = exp_config["model"].get("mixed_precision", True)
 
-    image1 = cv.imread(FLAGS.left, cv.IMREAD_UNCHANGED)
-    image2 = cv.imread(FLAGS.right, cv.IMREAD_UNCHANGED)
+    save_path = os.path.join(FLAGS.output, exp_config["name"])
+    os.makedirs(save_path, exist_ok=True)
 
-    image1 = image1[:, :, ::-1]
-    image2 = image2[:, :, ::-1]
+    for l_img_file in glob.glob(FLAGS.left):
+        l_suffix, r_suffix = FLAGS.replace
 
-    image1 = torch.from_numpy(image1.copy()).permute(2, 0, 1).float()
-    image2 = torch.from_numpy(image2.copy()).permute(2, 0, 1).float()
+        r_img_file = l_img_file.replace(l_suffix, r_suffix)
+        if not os.path.exists(r_img_file):
+            continue
 
-    image1 = image1[None].cuda()
-    image2 = image2[None].cuda()
+        l_img_name = os.path.splitext(os.path.basename(l_img_file))[0].replace(
+            l_suffix, ""
+        )
 
-    padder = InputPadder(
-        image1.shape, divis_by=2 ** exp_config["model"].get("downsample_factor", 6)
-    )
-    image1, image2 = padder.pad(image1, image2)
+        l_img = cv.imread(l_img_file, cv.IMREAD_UNCHANGED)
+        r_img = cv.imread(r_img_file, cv.IMREAD_UNCHANGED)
 
-    with autocast(enabled=use_mixed_precision):
-        start = time.time()
-        flow_pr = model(image1, image2)[-1]
-        end = time.time()
+        h, w = l_img.shape[:2]
 
-        fps = 1.0 / (end - start)
-        print(f"The model inference FPS: {fps:.4f}.")
+        l_img = l_img[:, :, ::-1]
+        r_img = r_img[:, :, ::-1]
 
-        try:
-            n_macs, n_params = profile(model, inputs=(image1, image2))
-            n_flops = FlopCountAnalysis(model, inputs=(image1, image2)).total()
+        l_img = torch.from_numpy(l_img.copy()).permute(2, 0, 1).float()
+        r_img = torch.from_numpy(r_img.copy()).permute(2, 0, 1).float()
 
-            print(
-                f"#MACS: {n_macs / 1e9:.6f}G, #params: {n_params / 1e6:.6f}M, #flops: {n_flops / 1e9:.6f}G."
-            )
-        except:
-            pass
+        l_img = l_img[None].cuda()
+        r_img = r_img[None].cuda()
 
-    flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
+        padder = InputPadder(
+            l_img.shape, divis_by=2 ** exp_config["model"].get("downsample_factor", 6)
+        )
+        l_img, r_img = padder.pad(l_img, r_img)
 
-    flow_pr = -1.0 * np.squeeze(flow_pr.cpu().detach().numpy(), axis=0).astype(np.float32)
-    flow_color = colorize_2d_matrix(flow_pr, min_val=1.0, max_val=64.0)
+        with autocast(enabled=use_mixed_precision):
+            start = time.time()
+            flow_pr = model(l_img, r_img)[-1]
+            end = time.time()
 
-    data_path = os.getcwd()
-    data_name = FLAGS.name
+            fps = 1.0 / (end - start)
+            print(f"The model inference on {l_img_file} FPS: {fps:.4f}.")
 
-    flow_pfm_file = os.path.join(data_path, f"{data_name}.pfm")
-    write_pfm_file(flow_pfm_file, np.flipud(flow_pr), 1.0)
+        flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
 
-    flow_color_file = os.path.join(data_path, f"{data_name}_colorize.png")
-    cv.imwrite(flow_color_file, flow_color)
+        flow_pr = -1.0 * np.squeeze(flow_pr.cpu().detach().numpy(), axis=0).astype(
+            np.float32
+        )
+        flow_color = colorize_2d_matrix(flow_pr, min_val=1.0, max_val=64.0)
+
+        flow_pfm_file = os.path.join(save_path, f"{l_img_name}_{w}x{h}_disparity.pfm")
+        write_pfm_file(flow_pfm_file, np.flipud(flow_pr), 1.0)
+
+        flow_color_file = os.path.join(save_path, f"{l_img_name}_{w}x{h}_disparity.png")
+        cv.imwrite(flow_color_file, flow_color)
 
 
 if __name__ == "__main__":
