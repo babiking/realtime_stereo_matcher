@@ -4,6 +4,7 @@ from model.mobile_stereo_net_v3 import MobileStereoNetV3
 from model.mobile_stereo_net_v4 import MobileStereoNetV4
 from model.mobile_disp_net_c import MobileDispNetC
 from model.opencv_sgbm_module import OpenCVSGBMModule
+from model.mobile_raft_net import MobileRaftNet
 
 
 def build_model(model_config):
@@ -19,5 +20,7 @@ def build_model(model_config):
         return MobileDispNetC(**model_config["parameters"])
     elif model_config["type"] == "OpenCVSGBMModule":
         return OpenCVSGBMModule(**model_config["parameters"])
+    elif model_config["type"] == "MobileRaftNet":
+        return MobileRaftNet(**model_config["parameters"])
     else:
         raise NotImplementedError("unsupport model: {}".format(model_config["type"]))
