@@ -99,6 +99,21 @@ class ResNetFeatureEncoder(nn.Module):
 
         self.relu1 = nn.ReLU(inplace=True)
 
+        self.conv2 = nn.Sequential(
+            ResidualBlock(
+                self.hidden_dims[self.down_factor],
+                self.hidden_dims[self.down_factor],
+                stride=1,
+                norm_fn="instance",
+            ),
+            nn.Conv2d(
+                self.hidden_dims[self.down_factor],
+                self.hidden_dims[self.down_factor],
+                3,
+                padding=1,
+            ),
+        )
+
         self.hidden_layers = nn.ModuleList([])
         for i in range(len(self.hidden_dims)):
             self.hidden_layers.append(
@@ -148,7 +163,7 @@ class ResNetFeatureEncoder(nn.Module):
 
         for i in range(self.down_factor + 1):
             x = self.hidden_layers[i](x)
-        fmap = x
+        fmap = self.conv2(x)
 
         pyramid = []
         if get_pyramid:
@@ -161,12 +176,13 @@ class ResNetFeatureEncoder(nn.Module):
 
 
 def make_correlation_pyramid(l_fmap, r_fmap, corr_levels):
-    n, _, h, w1 = l_fmap.shape
+    n, c, h, w1 = l_fmap.shape
     n, _, h, w2 = r_fmap.shape
 
     # corr_volume (4x downsample): 1 x 120 x 160 x 160
     corr_volume = torch.einsum("aijk,aijh->ajkh", l_fmap, r_fmap)
-    corr_volume = corr_volume.view(n * h * w1, 1, 1, w2)
+    corr_volume = corr_volume.view(n * h * w1, 1, 1, w2).contiguous()
+    corr_volume = corr_volume / torch.sqrt(torch.tensor(c).float())
 
     corr_pyramid = []
     for i in range(corr_levels):
@@ -233,25 +249,16 @@ class ConvGRU(nn.Module):
         self.hidden_dim = hidden_dim
         self.kernel_size = kernel_size
 
-        self.conv_xz = nn.Conv2d(
-            in_dim, hidden_dim, kernel_size, padding=(kernel_size - 1) // 2
-        )
-        self.conv_hz = nn.Conv2d(
-            hidden_dim, hidden_dim, kernel_size, padding=(kernel_size - 1) // 2
+        self.convz = nn.Conv2d(
+            in_dim + hidden_dim, hidden_dim, kernel_size, padding=(kernel_size - 1) // 2
         )
 
-        self.conv_xr = nn.Conv2d(
-            in_dim, hidden_dim, kernel_size, padding=(kernel_size - 1) // 2
-        )
-        self.conv_hr = nn.Conv2d(
-            hidden_dim, hidden_dim, kernel_size, padding=(kernel_size - 1) // 2
+        self.convr = nn.Conv2d(
+            in_dim + hidden_dim, hidden_dim, kernel_size, padding=(kernel_size - 1) // 2
         )
 
-        self.conv_xq = nn.Conv2d(
-            in_dim, hidden_dim, kernel_size, padding=(kernel_size - 1) // 2
-        )
-        self.conv_hq = nn.Conv2d(
-            hidden_dim, hidden_dim, kernel_size, padding=(kernel_size - 1) // 2
+        self.convq = nn.Conv2d(
+            in_dim + hidden_dim, hidden_dim, kernel_size, padding=(kernel_size - 1) // 2
         )
 
     def forward(self, x, h, z_bias=0.0, r_bias=0.0, q_bias=0.0):
@@ -263,13 +270,15 @@ class ConvGRU(nn.Module):
             h^[t] = q[t] = tanh(W_xq @ x[t] + r[t] .* (W_hq @ h[t - 1]))
             h[t] = (1 - z[t]) .* h^[t] + z[t] .* h[t - 1]
         """
-        z = torch.sigmoid(self.conv_xz(x) + self.conv_hz(h) + z_bias)
+        hx = torch.concat((h, x), dim=1)
 
-        r = torch.sigmoid(self.conv_xr(x) + self.conv_hr(h) + r_bias)
+        z = torch.sigmoid(self.convz(hx) + z_bias)
 
-        q = torch.tanh(self.conv_xq(x) + r * self.conv_hq(h) + q_bias)
+        r = torch.sigmoid(self.convr(hx) + r_bias)
 
-        h = (1.0 - z) * q + z * h
+        q = torch.tanh(self.convq(torch.concat((r * h, x), dim=1)) + q_bias)
+
+        h = (1.0 - z) * h + z * q
         return h
 
 
@@ -490,9 +499,11 @@ class MobileRaftNet(nn.Module):
         r_img = (2.0 * (r_img / 255.0) - 1.0).contiguous()
 
         l_fmap, l_encodes = self.encoder(l_img, get_pyramid=True)
-        r_fmap, _ = self.encoder(r_img, get_pyramid=True)
+        r_fmap, _ = self.encoder(r_img, get_pyramid=False)
 
-        corr_pyramid = make_correlation_pyramid(l_fmap, r_fmap, self.corr_levels)
+        corr_pyramid = make_correlation_pyramid(
+            l_fmap.float(), r_fmap.float(), self.corr_levels
+        )
 
         grid_x = init_grid_map(
             shape=l_fmap.shape, dtype=l_fmap.dtype, device=l_fmap.device
@@ -517,8 +528,6 @@ class MobileRaftNet(nn.Module):
             )
 
             flow_map = flow_map + delta_flow_map
-
-            flow_map = -1.0 * F.leaky_relu(-flow_map, negative_slope=0.2)
 
             flow_predictions.append(
                 upsample_by_convex_combine(
