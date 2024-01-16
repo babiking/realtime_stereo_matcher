@@ -33,16 +33,22 @@
         "type": "MobileRaftNet",
         "parameters": {
             "in_dim": 3,
-            "hidden_dims": [
+            "encode_hidden_dims": [
                 32,
                 48,
                 64,
-                96,
-                128
+                64,
+                64
             ],
             "down_factor": 2,
             "norm_fn": "batch",
-            "num_groups": 8
+            "num_groups": 8,
+            "corr_levels": 4,
+            "corr_radius": 4,
+            "motion_hidden_dim": 64,
+            "motion_out_dim": 64,
+            "flow_hidden_dim": 64,
+            "mask_hidden_dim": 64
         }
     },
     "data": {
