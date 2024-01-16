@@ -195,6 +195,7 @@ def sample_correlation_pyramid(corr_pyramid, corr_radius, grid_x, flow_map):
         dtype=flow_map.dtype,
         device=flow_map.device,
     )
+    dx = dx.view([2 * corr_radius + 1, 1])
 
     sample_pyramid = []
     for i, corr_volume in enumerate(corr_pyramid):
@@ -210,7 +211,7 @@ def sample_correlation_pyramid(corr_pyramid, corr_radius, grid_x, flow_map):
             padding_mode="zeros",
             align_corners=True,
         )
-        sample_volume.view(n, h, w, 2 * corr_radius + 1)
+        sample_volume = sample_volume.view(n, h, w, 2 * corr_radius + 1)
 
         sample_pyramid.append(sample_volume)
     sample_pyramid = torch.concat(sample_pyramid, dim=-1)
@@ -416,7 +417,7 @@ def upsample_by_convex_combine(in_flow, up_mask, down_factor, flow_radius):
 
     up_flow = up_flow.view(n, down_scale, down_scale, h, w)
     up_flow = up_flow.permute([0, 1, 3, 2, 4])
-    up_flow = up_flow.view([n, 1, down_scale * h, down_scale * w])
+    up_flow = up_flow.reshape([n, 1, down_scale * h, down_scale * w])
     return up_flow
 
 
@@ -513,6 +514,10 @@ class MobileRaftNet(nn.Module):
 
             flow_map = flow_map + delta_flow_map
 
-            flow_predictions.append(upsample_by_convex_combine(flow_map, upsample_mask))
+            flow_predictions.append(
+                upsample_by_convex_combine(
+                    flow_map, upsample_mask, self.down_factor, self.corr_radius
+                )
+            )
 
         return flow_predictions
