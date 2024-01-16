@@ -518,6 +518,8 @@ class MobileRaftNet(nn.Module):
 
             flow_map = flow_map + delta_flow_map
 
+            flow_map = -1.0 * F.leaky_relu(-flow_map, negative_slope=0.2)
+
             flow_predictions.append(
                 upsample_by_convex_combine(
                     flow_map, upsample_mask, self.down_factor, self.corr_radius
