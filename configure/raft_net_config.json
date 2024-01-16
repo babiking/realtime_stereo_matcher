@@ -2,7 +2,7 @@
     "name": "BASE_RAFT_NET",
     "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/BASE_RAFT_NET",
     "train": {
-        "batch_size": 6,
+        "batch_size": 4,
         "restore_checkpoint": "",
         "save_checkpoint_frequency": 10000,
         "datasets": [
@@ -13,7 +13,7 @@
             "kitti"
         ],
         "learn_rate": 0.0002,
-        "num_of_steps": 100000,
+        "num_of_steps": 150000,
         "weight_decay": 0.00001,
         "loss": {
             "type": "SequenceLoss",

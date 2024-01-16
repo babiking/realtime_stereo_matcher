@@ -117,9 +117,10 @@ class ResNetFeatureEncoder(nn.Module):
                         self.hidden_dims[i],
                         self.hidden_dims[i],
                         stride=1,
-                        norm_fn="instance",
+                        norm_fn=self.norm_fn,
                     ),
                     nn.Conv2d(self.hidden_dims[i], self.hidden_dims[i], 3, padding=1),
+                    nn.Tanh(),
                 )
             )
 
@@ -138,20 +139,25 @@ class ResNetFeatureEncoder(nn.Module):
             ResidualBlock(out_dim, out_dim, stride=1, norm_fn=self.norm_fn),
         )
 
-    def forward(self, x):
+    def forward(self, x, get_pyramid=True):
         # x: 1 x 3 x 480 x 640
         # conv1: 1 x 64 x 480 x 640
         x = self.conv1(x)
         x = self.norm1(x)
         x = self.relu1(x)
 
-        extract_outs = []
-        for i, hidden_layer in enumerate(self.hidden_layers):
-            x = hidden_layer(x)
+        for i in range(self.down_factor + 1):
+            x = self.hidden_layers[i](x)
+        fmap = x
 
-            if i >= self.down_factor:
-                extract_outs.append(self.out_layers[i - self.down_factor](x))
-        return extract_outs
+        pyramid = []
+        if get_pyramid:
+            for j in range(self.down_factor, len(self.hidden_dims)):
+                if j > self.down_factor:
+                    x = self.hidden_layers[j](x)
+
+                pyramid.append(self.out_layers[j - self.down_factor](x))
+        return fmap, pyramid
 
 
 def make_correlation_pyramid(l_fmap, r_fmap, corr_levels):
@@ -413,7 +419,7 @@ def upsample_by_convex_combine(in_flow, up_mask, down_factor, flow_radius):
     )
     up_flow = up_flow.view([n, flow_range, 1, h, w])
 
-    up_flow = torch.sum(up_mask * up_flow, dim=1)
+    up_flow = torch.sum(up_mask * up_flow, dim=1, keepdim=True)
 
     up_flow = up_flow.view(n, down_scale, down_scale, h, w)
     up_flow = up_flow.permute([0, 1, 3, 2, 4])
@@ -483,33 +489,31 @@ class MobileRaftNet(nn.Module):
         l_img = (2.0 * (l_img / 255.0) - 1.0).contiguous()
         r_img = (2.0 * (r_img / 255.0) - 1.0).contiguous()
 
-        l_fmaps = self.encoder(l_img)
-        r_fmaps = self.encoder(r_img)
+        l_fmap, l_encodes = self.encoder(l_img, get_pyramid=True)
+        r_fmap, _ = self.encoder(r_img, get_pyramid=True)
 
-        corr_pyramid = make_correlation_pyramid(
-            l_fmaps[0], r_fmaps[0], self.corr_levels
-        )
-
-        l_fmaps = [F.tanh(x) for x in l_fmaps]
+        corr_pyramid = make_correlation_pyramid(l_fmap, r_fmap, self.corr_levels)
 
         grid_x = init_grid_map(
-            shape=l_fmaps[0].shape, dtype=l_fmaps[0].dtype, device=l_fmaps[0].device
+            shape=l_fmap.shape, dtype=l_fmap.dtype, device=l_fmap.device
         )
 
         if flow_map is None:
-            n, _, h, w = l_fmaps[0].shape
+            n, _, h, w = l_fmap.shape
             flow_map = torch.zeros(
-                size=[n, 1, h, w], dtype=l_fmaps[0].dtype, device=l_fmaps[0].device
+                size=[n, 1, h, w], dtype=l_fmap.dtype, device=l_fmap.device
             )
 
         flow_predictions = []
         for i in range(num_iters):
+            grid_x = grid_x.detach().clone()
+
             corr_fmap = sample_correlation_pyramid(
                 corr_pyramid, self.corr_radius, grid_x, flow_map
             )
 
-            l_fmaps, delta_flow_map, upsample_mask = self.updater(
-                l_fmaps, corr_fmap, flow_map
+            l_encodes, delta_flow_map, upsample_mask = self.updater(
+                l_encodes, corr_fmap, flow_map
             )
 
             flow_map = flow_map + delta_flow_map
