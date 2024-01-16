@@ -57,8 +57,8 @@ class OpenCVSGBMModule(nn.Module):
             r_img_i = r_img[i, :, :, :].permute([1, 2, 0]).cpu().detach().numpy()
 
             if c == 3:
-                l_img_i = cv.cvtColor(l_img_i, cv.COLOR_BGR2GRAY)
-                r_img_i = cv.cvtColor(r_img_i, cv.COLOR_BGR2GRAY)
+                l_img_i = cv.cvtColor(l_img_i, cv.COLOR_RGB2GRAY)
+                r_img_i = cv.cvtColor(r_img_i, cv.COLOR_RGB2GRAY)
 
             l_disp_i = self.l_sgbm.compute(
                 l_img_i.astype(np.uint8), r_img_i.astype(np.uint8)
