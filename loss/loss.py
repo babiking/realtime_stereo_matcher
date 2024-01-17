@@ -82,7 +82,7 @@ class SequenceLoss(nn.Module):
         return flow_loss
 
 
-class SelfSupervisedLoss(nn.Module):
+class AdaptiveLoss(nn.Module):
     def __init__(
         self,
         use_recon_loss=True,
