@@ -97,6 +97,7 @@ class AdaptiveLoss(nn.Module):
         recon_weight=1.0,
         smooth_weight=1.0,
         consist_weight=1.0,
+        loss_gamma=0.7,
         *args,
         **kwargs,
     ) -> None:
@@ -114,6 +115,7 @@ class AdaptiveLoss(nn.Module):
         self.recon_weight = recon_weight
         self.smooth_weight = smooth_weight
         self.consist_weight = consist_weight
+        self.loss_gamma = loss_gamma
 
     def warp_by_flow_map(self, img, flow):
         """
@@ -300,16 +302,21 @@ class AdaptiveLoss(nn.Module):
         )
         raise self.consist_weight * loss
 
-    def forward(self, l_img, r_img, l_disp, r_disp):
+    def forward(self, l_img, r_img, l_disps, r_disps):
         loss = 0.0
 
-        if self.use_recon_loss:
-            loss += self.get_reconstruct_loss(l_img, r_img, l_disp)
+        for i, (l_disp, r_disp) in enumerate(zip(l_disps, r_disps)):
+            i_weight = self.loss_gamma ** (len(l_disps) - 1 - i)
 
-        if self.use_smooth_loss:
-            loss += self.get_smooth_loss(l_img, l_disp)
+            i_loss = 0.0
+            if self.use_recon_loss:
+                i_loss += self.get_reconstruct_loss(l_img, r_img, l_disp)
 
-        if self.use_consist_loss:
-            loss += self.get_consist_loss(l_disp, r_disp)
+            if self.use_smooth_loss:
+                i_loss += self.get_smooth_loss(l_img, l_disp)
 
+            if self.use_consist_loss:
+                i_loss += self.get_consist_loss(l_disp, r_disp)
+
+            loss += i_weight * i_loss
         return loss
