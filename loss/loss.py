@@ -226,10 +226,79 @@ class SelfSupervisedLoss(nn.Module):
         return self.recon_weight * loss
 
     def get_smooth_loss(self, l_img, l_disp):
-        raise NotImplementedError
+        def get_sobel_x_filter():
+            return torch.tensor(
+                [
+                    [-1.0, 0.0, 1.0],
+                    [-2.0, 0.0, 2.0],
+                    [-1.0, 0.0, 1.0],
+                ]
+            ).float()
+
+        def get_sobel_y_filter():
+            return torch.tensor(
+                [
+                    [1.0, 2.0, 1.0],
+                    [0.0, 0.0, 0.0],
+                    [-1.0, -2.0, -1.0],
+                ]
+            ).float()
+
+        def get_laplacian_filter():
+            return torch.tensor(
+                [
+                    [0.0, 1.0, 0.0],
+                    [1.0, -4.0, 1.0],
+                    [0.0, 1.0, 0.0],
+                ]
+            ).float()
+
+        n, c, h, w = l_img
+
+        l_img_gray = (
+            (
+                0.299 * l_img[:, 0, :, :]
+                + 0.587 * l_img[:, 1, :, :]
+                + 0.114 * l_img[:, 2, :, :]
+            )
+            if c == 3
+            else l_img
+        )
+
+        win_x_2d = get_sobel_x_filter().to(l_img.device)
+        win_x_2d = win_x_2d.reshape([1, 1, 3, 3])
+
+        win_y_2d = get_sobel_y_filter().to(l_img.device)
+        win_y_2d = win_y_2d.reshape([1, 1, 3, 3])
+
+        l_img_dx = F.conv2d(l_img_gray, win_x_2d, padding=1, groups=1)
+        l_img_dy = F.conv2d(l_img_gray, win_y_2d, padding=1, groups=1)
+
+        l_disp_dx = F.conv2d(l_disp, win_x_2d, padding=1, groups=1)
+        l_disp_dx2 = F.conv2d(l_disp_dx, win_x_2d, padding=1, groups=1)
+        l_disp_dy = F.conv2d(l_disp, win_y_2d, padding=1, groups=1)
+        l_disp_dy2 = F.conv2d(l_disp_dy, win_y_2d, padding=1, groups=1)
+
+        loss_x = torch.abs(l_disp_dx2) * torch.exp(
+            -self.smooth_beta * torch.abs(l_img_dx)
+        )
+        loss_y = torch.abs(l_disp_dy2) * torch.exp(
+            -self.smooth_beta * torch.abs(l_img_dy)
+        )
+
+        loss = torch.mean(loss_x + loss_y)
+        raise self.smooth_weight * loss
 
     def get_consist_loss(self, l_disp, r_disp):
-        raise NotImplementedError
+        # NOTE: for symmetry, left disparity > 0 and right disparity < 0
+        r_disp_warp = self.warp_by_flow_map(-1.0 * r_disp, l_disp)
+
+        l_disp_warp = self.warp_by_flow_map(l_disp, r_disp)
+
+        loss = torch.mean(
+            torch.abs(l_disp - r_disp_warp) + torch.abs(r_disp - l_disp_warp)
+        )
+        raise self.consist_weight * loss
 
     def forward(self, l_img, r_img, l_disp, r_disp):
         loss = 0.0
