@@ -1,4 +1,4 @@
-from loss.loss import SequenceLoss
+from loss.loss import SequenceLoss, SelfSupervisedLoss
 
 
 def build_loss_function(loss_config):
@@ -6,5 +6,7 @@ def build_loss_function(loss_config):
 
     if loss_type == "SequenceLoss":
         return SequenceLoss(**loss_config["parameters"])
+    elif loss_type == "SelfSupervisedLoss":
+        return SelfSupervisedLoss(**loss_config["parameters"])
     else:
         raise NotImplementedError(f"invalid loss type: {loss_type}!")
