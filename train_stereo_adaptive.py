@@ -16,6 +16,7 @@ from loss import build_loss_function
 from loss.loss import get_flow_map_metrics
 import dataset.stereo_datasets as datasets
 from torch.cuda.amp import GradScaler
+from dataset.input_padder import InputPadder
 
 
 import gflags
@@ -49,7 +50,7 @@ def fetch_optimizer(exp_config, model):
 
 
 class Logger:
-    SUM_FREQ = 100
+    SUM_FREQ = 1
 
     def __init__(self, model, scheduler, log_dir=None):
         self.model = model
@@ -89,17 +90,17 @@ class Logger:
             self.running_loss[k] = 0.0
 
     def push(self, metrics):
-        self.total_steps += 1
-
         for key in metrics:
             if key not in self.running_loss:
                 self.running_loss[key] = 0.0
 
             self.running_loss[key] += metrics[key]
 
-        if self.total_steps % Logger.SUM_FREQ == Logger.SUM_FREQ - 1:
+        if self.total_steps % Logger.SUM_FREQ == 0:
             self._print_training_status()
             self.running_loss = {}
+
+        self.total_steps += 1
 
     def write_dict(self, results):
         if self.writer is None:
@@ -146,18 +147,20 @@ def train(exp_config):
     total_steps = 0
     logger = Logger(model, scheduler, log_dir=os.path.join(exp_config["path"], "runs"))
 
-    restore_ckpt = exp_config["train"]["restore_checkpoint"]
-    if restore_ckpt is not None and len(restore_ckpt) > 0:
-        assert restore_ckpt.endswith(".pth") or restore_ckpt.endswith(".pth.gz")
-        logging.info(f"Model loading checkpoint from {restore_ckpt}...")
-        model.load_state_dict(torch.load(restore_ckpt), strict=True)
-        logging.info(f"Done loading checkpoint.")
-
     model.cuda()
     model.train()
     initialize(model.module)
 
-    scaler = GradScaler(enabled=exp_config["model"].get("mixed_precision", True))
+    restore_ckpt = exp_config["train"]["restore_checkpoint"]
+    if restore_ckpt is not None and len(restore_ckpt) > 0:
+        assert restore_ckpt.endswith(".pth") or restore_ckpt.endswith(".pth.gz")
+        logging.info(f"Model loading checkpoint from {restore_ckpt}...")
+        model.load_state_dict(
+            torch.load(exp_config["train"]["restore_checkpoint"]), strict=True
+        )
+        logging.info(f"Done loading checkpoint.")
+
+    scaler = GradScaler(enabled=exp_config["model"].get("mixed_precision", False))
 
     should_keep_training = True
     global_batch_num = 0
@@ -166,16 +169,11 @@ def train(exp_config):
             optimizer.zero_grad()
             l_img, r_img, flow, valid = [x.cuda() for x in data_blob]
 
-            assert model.training
+            l_img_flip = torch.flip(l_img, dims=[-1])
+            r_img_flip = torch.flip(r_img, dims=[-1])
+
             l_disps = model(l_img, r_img)
-            assert model.training
-
-            l_img_flip = l_img[:, :, :, ::-1]
-            r_img_flip = r_img[:, :, :, ::-1]
-
-            assert model.training
-            r_disps = [x[:, :, :, ::-1] for x in model(r_img_flip, l_img_flip)]
-            assert model.training
+            r_disps = [torch.flip(x, dims=[-1]) for x in model(r_img_flip, l_img_flip)]
 
             # AdaptiveLoss left disparity > 0 and right disparity < 0
             loss = loss_func(l_img, r_img, [-1.0 * x for x in l_disps], r_disps)

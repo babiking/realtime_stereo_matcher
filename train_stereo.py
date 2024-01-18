@@ -146,16 +146,16 @@ def train(exp_config):
     total_steps = 0
     logger = Logger(model, scheduler, log_dir=os.path.join(exp_config["path"], "runs"))
 
+    model.cuda()
+    model.train()
+    initialize(model.module)
+
     restore_ckpt = exp_config["train"]["restore_checkpoint"]
     if restore_ckpt is not None and len(restore_ckpt) > 0:
         assert restore_ckpt.endswith(".pth") or restore_ckpt.endswith(".pth.gz")
         logging.info(f"Model loading checkpoint from {restore_ckpt}...")
         model.load_state_dict(torch.load(restore_ckpt), strict=True)
         logging.info(f"Done loading checkpoint.")
-
-    model.cuda()
-    model.train()
-    initialize(model.module)
 
     scaler = GradScaler(enabled=exp_config["model"].get("mixed_precision", True))
 
