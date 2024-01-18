@@ -94,10 +94,12 @@ class AdaptiveLoss(nn.Module):
         ssim_c1=0.01**2,
         ssim_c2=0.03**2,
         smooth_beta=1.0,
+        smooth_scale=20.0,
         recon_weight=1.0,
         smooth_weight=1.0,
         consist_weight=1.0,
         loss_gamma=0.7,
+        margin_ratio=0.2,
         *args,
         **kwargs,
     ) -> None:
@@ -112,10 +114,12 @@ class AdaptiveLoss(nn.Module):
         self.ssim_c1 = ssim_c1
         self.ssim_c2 = ssim_c2
         self.smooth_beta = smooth_beta
+        self.smooth_scale = smooth_scale
         self.recon_weight = recon_weight
         self.smooth_weight = smooth_weight
         self.consist_weight = consist_weight
         self.loss_gamma = loss_gamma
+        self.margin_ratio = margin_ratio
 
     def warp_by_flow_map(self, img, flow):
         """
@@ -156,7 +160,26 @@ class AdaptiveLoss(nn.Module):
         )
         return warped
 
-    def calculate_SSIM(self, src_img, dst_img, win_size, sigma, c1, c2):
+    def calculate_average_SSIM(self, x, y, c1, c2):
+        """
+        SSIM (Structure Similarity Index Measure) implementation based on: https://github.com/IShengFang/ES3Net/tree/main
+        """
+        mu_x = F.avg_pool2d(x, 3, 1, 0)
+        mu_y = F.avg_pool2d(y, 3, 1, 0)
+
+        # (input, kernel, stride, padding)
+        sigma_x = F.avg_pool2d(x**2, 3, 1, 0) - mu_x**2
+        sigma_y = F.avg_pool2d(y**2, 3, 1, 0) - mu_y**2
+        sigma_xy = F.avg_pool2d(x * y, 3, 1, 0) - mu_x * mu_y
+
+        SSIM_n = (2 * mu_x * mu_y + c1) * (2 * sigma_xy + c2)
+        SSIM_d = (mu_x**2 + mu_y**2 + c1) * (sigma_x + sigma_y + c2)
+
+        SSIM = SSIM_n / SSIM_d
+
+        return torch.clamp((1 - SSIM) / 2.0, 0.0, 1.0)
+
+    def calculate_guassian_SSIM(self, src_img, dst_img, win_size, sigma, c1, c2):
         """
         SSIM (Structure Similarity Index Measure) implementation based on: https://github.com/Po-Hsun-Su/pytorch-ssim
         """
@@ -206,104 +229,46 @@ class AdaptiveLoss(nn.Module):
         ssim_map = ((2 * pair_mu_sq + c1) * (2 * pair_sigma_sq + c2)) / (
             (src_mu_sq + dst_mu_sq + c1) * (src_sigma_sq + dst_sigma_sq + c2)
         )
-        return ssim_map
+        return torch.clamp((1 - ssim_map) / 2.0, 0.0, 1.0)
 
     def get_reconstruct_loss(self, l_img, r_img, l_disp):
         n, c, h, w = l_img.shape
 
-        r_img_warp = self.warp_by_flow_map(r_img, l_disp)
+        margin = int(self.margin_ratio * w)
 
-        ssim = self.calculate_SSIM(
-            l_img,
-            r_img_warp,
-            win_size=self.ssim_win_size,
-            sigma=self.ssim_sigma,
-            c1=self.ssim_c1,
-            c2=self.ssim_c2,
+        l_img_warp = self.warp_by_flow_map(r_img, l_disp)
+        ssim = torch.mean(
+            self.calculate_average_SSIM(
+                l_img[:, :, :, margin:],
+                l_img_warp[:, :, :, margin:],
+                c1=self.ssim_c1,
+                c2=self.ssim_c2,
+            )
         )
-
-        l1_diff = torch.abs(l_img - r_img_warp) / np.sqrt(float(w))
-
-        loss = torch.mean(
-            self.recon_alpha * 0.5 * (1.0 - ssim) + (1.0 - self.recon_alpha) * l1_diff
+        l1_diff = torch.mean(
+            torch.abs(l_img[:, :, :, margin:] - l_img_warp[:, :, :, margin:])
         )
-        return self.recon_weight * loss
+        loss = self.recon_alpha * ssim + (1.0 - self.recon_alpha) * l1_diff
+        return loss
 
-    def get_smooth_loss(self, l_img, l_disp):
-        def get_sobel_x_filter():
-            return torch.tensor(
-                [
-                    [-1.0, 0.0, 1.0],
-                    [-2.0, 0.0, 2.0],
-                    [-1.0, 0.0, 1.0],
-                ]
-            ).float()
+    def get_smooth_loss(self, img, disp):
+        def get_xy_gradient(data):
+            dx = data[:, :, :, 1:] - data[:, :, :, :-1]
+            dy = data[:, :, 1:, :] - data[:, :, :-1, :]
+            return dx, dy
 
-        def get_sobel_y_filter():
-            return torch.tensor(
-                [
-                    [1.0, 2.0, 1.0],
-                    [0.0, 0.0, 0.0],
-                    [-1.0, -2.0, -1.0],
-                ]
-            ).float()
+        img_dx, img_dy = get_xy_gradient(img)
+        img_wx = torch.exp(-10.0 * torch.mean(torch.abs(img_dx), 1, keepdim=True))
+        img_wy = torch.exp(-10.0 * torch.mean(torch.abs(img_dy), 1, keepdim=True))
 
-        def get_laplacian_filter():
-            return torch.tensor(
-                [
-                    [0.0, 1.0, 0.0],
-                    [1.0, -4.0, 1.0],
-                    [0.0, 1.0, 0.0],
-                ]
-            ).float()
+        disp_dx, disp_dy = get_xy_gradient(disp)
+        disp_dx2, _ = get_xy_gradient(disp_dx)
+        _, disp_dy2 = get_xy_gradient(disp_dy)
 
-        n, c, h, w = l_img.shape
-
-        if c == 3:
-            l_img_gray = (
-                0.299 * l_img[:, 0, :, :]
-                + 0.587 * l_img[:, 1, :, :]
-                + 0.114 * l_img[:, 2, :, :]
-            ).unsqueeze(1)
-        else:
-            l_img_gray = l_img
-
-        win_x_2d = get_sobel_x_filter().to(l_img.device)
-        win_x_2d = win_x_2d.reshape([1, 1, 3, 3])
-
-        win_y_2d = get_sobel_y_filter().to(l_img.device)
-        win_y_2d = win_y_2d.reshape([1, 1, 3, 3])
-
-        l_img_dx = F.conv2d(l_img_gray, win_x_2d, padding=1, groups=1)
-        l_img_dy = F.conv2d(l_img_gray, win_y_2d, padding=1, groups=1)
-
-        l_disp_dx = F.conv2d(l_disp, win_x_2d, padding=1, groups=1)
-        l_disp_dx2 = F.conv2d(l_disp_dx, win_x_2d, padding=1, groups=1)
-        l_disp_dy = F.conv2d(l_disp, win_y_2d, padding=1, groups=1)
-        l_disp_dy2 = F.conv2d(l_disp_dy, win_y_2d, padding=1, groups=1)
-
-        loss_x = torch.abs(l_disp_dx2) * torch.exp(
-            -self.smooth_beta * torch.abs(l_img_dx)
-        )
-        loss_y = torch.abs(l_disp_dy2) * torch.exp(
-            -self.smooth_beta * torch.abs(l_img_dy)
-        )
-
-        loss = torch.mean(loss_x + loss_y)
-        return self.smooth_weight * loss
-
-    def get_consist_loss(self, l_disp, r_disp):
-        n, c, h, w = l_disp.shape
-
-        # NOTE: for symmetry, left disparity > 0 and right disparity < 0
-        r_disp_warp = self.warp_by_flow_map(-1.0 * r_disp, l_disp)
-
-        l_disp_warp = self.warp_by_flow_map(-1.0 * l_disp, r_disp)
-
-        loss = torch.mean(
-            torch.abs(l_disp - r_disp_warp) + torch.abs(r_disp - l_disp_warp)
-        ) / np.sqrt(float(w))
-        return self.consist_weight * loss
+        return (
+            torch.mean(self.smooth_beta * img_wx[:, :, :, 1:] * torch.abs(disp_dx2))
+            + torch.mean(self.smooth_beta * img_wy[:, :, 1:, :] * torch.abs(disp_dy2))
+        ) / 2.0
 
     def forward(self, l_img, r_img, l_disps, r_disps):
         loss = 0.0
@@ -313,13 +278,39 @@ class AdaptiveLoss(nn.Module):
 
             i_loss = 0.0
             if self.use_recon_loss:
-                i_loss += self.get_reconstruct_loss(l_img, r_img, l_disp)
+                i_loss += (
+                    self.get_reconstruct_loss(l_img, r_img, l_disp) * self.recon_weight
+                )
+                i_loss += (
+                    self.get_reconstruct_loss(
+                        r_img.flip(-1), l_img.flip(-1), r_disp.flip(-1)
+                    )
+                    * self.recon_weight
+                )
 
             if self.use_smooth_loss:
-                i_loss += self.get_smooth_loss(l_img, l_disp)
+                i_loss += (
+                    self.get_smooth_loss(l_img, l_disp / self.smooth_scale)
+                    * self.smooth_weight
+                )
+                i_loss += (
+                    self.get_smooth_loss(r_img, r_disp / self.smooth_scale)
+                    * self.smooth_weight
+                )
 
             if self.use_consist_loss:
-                i_loss += self.get_consist_loss(l_disp, r_disp)
+                i_loss += (
+                    self.get_reconstruct_loss(l_disp, r_disp, l_disp)
+                    * self.consist_weight
+                )
+                i_loss += (
+                    self.get_reconstruct_loss(
+                        r_disp.flip(-1), l_disp.flip(-1), r_disp.flip(-1)
+                    )
+                    * self.consist_weight
+                )
 
             loss += i_weight * i_loss
+        
+        print(loss)
         return loss
