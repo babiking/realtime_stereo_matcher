@@ -259,15 +259,14 @@ class AdaptiveLoss(nn.Module):
 
         n, c, h, w = l_img.shape
 
-        l_img_gray = (
-            (
+        if c == 3:
+            l_img_gray = (
                 0.299 * l_img[:, 0, :, :]
                 + 0.587 * l_img[:, 1, :, :]
                 + 0.114 * l_img[:, 2, :, :]
-            )
-            if c == 3
-            else l_img
-        )
+            ).unsqueeze(1)
+        else:
+            l_img_gray = l_img
 
         win_x_2d = get_sobel_x_filter().to(l_img.device)
         win_x_2d = win_x_2d.reshape([1, 1, 3, 3])
@@ -304,7 +303,6 @@ class AdaptiveLoss(nn.Module):
         loss = torch.mean(
             torch.abs(l_disp - r_disp_warp) + torch.abs(r_disp - l_disp_warp)
         ) / np.sqrt(float(w))
-        print(loss)
         return self.consist_weight * loss
 
     def forward(self, l_img, r_img, l_disps, r_disps):
