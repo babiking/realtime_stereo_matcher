@@ -16,7 +16,6 @@ from loss import build_loss_function
 from loss.loss import get_flow_map_metrics
 import dataset.stereo_datasets as datasets
 from torch.cuda.amp import GradScaler
-from dataset.input_padder import InputPadder
 
 
 import gflags
@@ -176,7 +175,7 @@ def train(exp_config):
             r_disps = [torch.flip(x, dims=[-1]) for x in model(r_img_flip, l_img_flip)]
 
             # AdaptiveLoss left disparity > 0 and right disparity < 0
-            loss = loss_func(l_img, r_img, [-1.0 * x for x in l_disps], r_disps)
+            loss = loss_func(l_img, r_img, [-1.0 * l_disps[-1]], [r_disps[-1]])
             metrics = get_flow_map_metrics(flow, l_disps[-1], valid)
             logger.writer.add_scalar("live_loss", loss.item(), global_batch_num)
             logger.writer.add_scalar(

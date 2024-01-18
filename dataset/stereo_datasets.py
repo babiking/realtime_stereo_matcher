@@ -222,7 +222,10 @@ class SceneFlowDatasets(StereoDataset):
 
 class ETH3D(StereoDataset):
     def __init__(
-        self, aug_params=None, root="/mnt/data/workspace/datasets/ETH3D", split="training"
+        self,
+        aug_params=None,
+        root="/mnt/data/workspace/datasets/ETH3D",
+        split="training",
     ):
         super(ETH3D, self).__init__(aug_params, sparse=True)
 
@@ -411,13 +414,17 @@ class Middlebury(StereoDataset):
 def fetch_dataloader(exp_config):
     """Create the data loader for the corresponding trainign set"""
 
-    aug_params = {
-        "crop_size": exp_config["data"]["image_size"],
-        "min_scale": exp_config["data"]["spatial_scale"][0],
-        "max_scale": exp_config["data"]["spatial_scale"][1],
-        "do_flip": exp_config["data"]["do_flip"],
-        "yjitter": not exp_config["data"]["no_y_jitter"],
-    }
+    if len(exp_config["data"]) > 0:
+        aug_params = {
+            "crop_size": exp_config["data"]["image_size"],
+            "min_scale": exp_config["data"]["spatial_scale"][0],
+            "max_scale": exp_config["data"]["spatial_scale"][1],
+            "do_flip": exp_config["data"]["do_flip"],
+            "yjitter": not exp_config["data"]["no_y_jitter"],
+        }
+    else:
+        aug_params = {}
+
     if (
         hasattr(exp_config["data"], "saturation_range")
         and exp_config["data"]["saturation_range"] is not None
@@ -450,7 +457,9 @@ def fetch_dataloader(exp_config):
                 subsets=["things"],
             )
             # final_dataset = SceneFlowDatasets(aug_params, dstype="frames_finalpass")
-            logging.info(f"Adding {len(new_dataset)} samples from SceneFlow/FlyingThings3D")
+            logging.info(
+                f"Adding {len(new_dataset)} samples from SceneFlow/FlyingThings3D"
+            )
         elif dataset_name == "sceneflow/driving":
             new_dataset = SceneFlowDatasets(
                 aug_params,
@@ -474,7 +483,9 @@ def fetch_dataloader(exp_config):
             logging.info(f"Adding {len(new_dataset)} samples from Tartain Air")
         elif dataset_name == "eth3d":
             new_dataset = ETH3D(
-                aug_params=aug_params, root="/mnt/data/workspace/datasets/ETH3D", split="training"
+                aug_params=aug_params,
+                root="/mnt/data/workspace/datasets/ETH3D",
+                split="training",
             )
             logging.info(f"Adding {len(new_dataset)} samples from ETH3D")
         train_dataset = (

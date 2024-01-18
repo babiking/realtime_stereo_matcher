@@ -209,6 +209,8 @@ class AdaptiveLoss(nn.Module):
         return ssim_map
 
     def get_reconstruct_loss(self, l_img, r_img, l_disp):
+        n, c, h, w = l_img.shape
+
         r_img_warp = self.warp_by_flow_map(r_img, l_disp)
 
         ssim = self.calculate_SSIM(
@@ -220,7 +222,7 @@ class AdaptiveLoss(nn.Module):
             c2=self.ssim_c2,
         )
 
-        l1_diff = torch.abs(l_img - r_img_warp)
+        l1_diff = torch.abs(l_img - r_img_warp) / np.sqrt(float(w))
 
         loss = torch.mean(
             self.recon_alpha * 0.5 * (1.0 - ssim) + (1.0 - self.recon_alpha) * l1_diff
@@ -255,7 +257,7 @@ class AdaptiveLoss(nn.Module):
                 ]
             ).float()
 
-        n, c, h, w = l_img
+        n, c, h, w = l_img.shape
 
         l_img_gray = (
             (
@@ -289,18 +291,21 @@ class AdaptiveLoss(nn.Module):
         )
 
         loss = torch.mean(loss_x + loss_y)
-        raise self.smooth_weight * loss
+        return self.smooth_weight * loss
 
     def get_consist_loss(self, l_disp, r_disp):
+        n, c, h, w = l_disp.shape
+
         # NOTE: for symmetry, left disparity > 0 and right disparity < 0
         r_disp_warp = self.warp_by_flow_map(-1.0 * r_disp, l_disp)
 
-        l_disp_warp = self.warp_by_flow_map(l_disp, r_disp)
+        l_disp_warp = self.warp_by_flow_map(-1.0 * l_disp, r_disp)
 
         loss = torch.mean(
             torch.abs(l_disp - r_disp_warp) + torch.abs(r_disp - l_disp_warp)
-        )
-        raise self.consist_weight * loss
+        ) / np.sqrt(float(w))
+        print(loss)
+        return self.consist_weight * loss
 
     def forward(self, l_img, r_img, l_disps, r_disps):
         loss = 0.0

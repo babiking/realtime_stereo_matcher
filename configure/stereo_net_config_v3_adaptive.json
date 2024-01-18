@@ -2,21 +2,21 @@
     "name": "ADAPTIVE_STAGE_1_STEREO_NET_V3",
     "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/ADAPTIVE_STAGE_1_STEREO_NET_V3",
     "train": {
-        "batch_size": 8,
-        "restore_checkpoint": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/UNET_STEREO_NET_V3/checkpoints/UNET_STEREO_NET_V3-epoch-100000.pth.gz",
-        "save_checkpoint_frequency": 10000,
+        "batch_size": 6,
+        "restore_checkpoint": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/200K_STEREO_NET_V3/checkpoints/200K_STEREO_NET_V3-epoch-200000.pth.gz",
+        "save_checkpoint_frequency": 100,
         "datasets": [
             "middlebury_Q"
         ],
         "learn_rate": 0.00002,
-        "num_of_steps": 20000,
+        "num_of_steps": 5000,
         "weight_decay": 0.00001,
         "loss": {
             "type": "AdaptiveLoss",
             "parameters": {
-                "use_recon_loss": true,
+                "use_recon_loss": false,
                 "use_smooth_loss": false,
-                "use_consist_loss": false,
+                "use_consist_loss": true,
                 "recon_alpha": 0.85,
                 "ssim_win_size": 11,
                 "ssim_sigma": 1.5,
