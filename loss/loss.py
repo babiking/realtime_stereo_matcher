@@ -233,12 +233,17 @@ class AdaptiveLoss(nn.Module):
         )
         return torch.clamp((1 - ssim_map) / 2.0, 0.0, 1.0)
 
-    def get_reconstruct_loss(self, l_img, r_img, l_disp, margin_ratio, alpha):
+    def get_reconstruct_loss(
+        self, l_img, r_img, l_disp, margin_ratio, alpha, l_occ=None
+    ):
         n, c, h, w = l_img.shape
 
         margin = int(margin_ratio * w)
 
         l_img_warp = self.warp_by_flow_map(r_img, l_disp)
+        if l_occ is not None:
+            l_img_warp[l_occ] = l_img[l_occ]
+
         ssim = torch.mean(
             self.calculate_average_SSIM(
                 l_img[:, :, :, margin:],
@@ -272,74 +277,71 @@ class AdaptiveLoss(nn.Module):
             + torch.mean(beta * img_wy[:, :, 1:, :] * torch.abs(disp_dy2))
         ) / 2.0
 
-    def forward(self, l_img, r_img, l_disps, r_disps):
+    def forward(self, l_img, r_img, l_disps, r_disps, l_occ=None, r_occ=None):
         loss = 0.0
 
-        for i, (l_disp, r_disp) in enumerate(zip(l_disps, r_disps)):
-            i_weight = self.loss_gamma ** (len(l_disps) - 1 - i)
+        n_samples = len(l_disps)
+
+        for i in range(n_samples):
+            l_disp = l_disps[i]
+            r_disp = r_disps[i]
+
+            i_weight = self.loss_gamma ** (n_samples - 1 - i)
 
             i_loss = 0.0
+
             if self.use_recon_loss:
-                i_loss += (
-                    self.get_reconstruct_loss(
-                        l_img,
-                        r_img,
-                        l_disp,
-                        self.margin_ratio,
-                        self.recon_alpha,
-                    )
-                    * self.recon_weight
+                l_recon_loss = self.get_reconstruct_loss(
+                    l_img, r_img, l_disp, self.margin_ratio, self.recon_alpha, l_occ
                 )
 
-                if self.use_dual_transform:
-                    i_loss += (
-                        self.get_reconstruct_loss(
-                            r_img.flip(-1),
-                            l_img.flip(-1),
-                            r_disp.flip(-1),
-                            self.margin_ratio,
-                            self.recon_alpha,
-                        )
-                        * self.recon_weight
+                r_recon_loss = (
+                    self.get_reconstruct_loss(
+                        r_img.flip(-1),
+                        l_img.flip(-1),
+                        r_disp.flip(-1),
+                        self.margin_ratio,
+                        self.recon_alpha,
+                        r_occ.flip(-1),
                     )
+                    if self.use_dual_transform
+                    else 0.0
+                )
+                i_loss += self.recon_weight * (l_recon_loss + r_recon_loss)
 
             if self.use_smooth_loss:
-                i_loss += (
-                    self.get_smooth_loss(
-                        l_img, l_disp / self.smooth_scale, self.smooth_beta
-                    )
-                    * self.smooth_weight
+                l_smooth_loss = self.get_smooth_loss(
+                    l_img, l_disp / self.smooth_scale, self.smooth_beta
                 )
-                if self.use_dual_transform:
-                    i_loss += (
-                        self.get_smooth_loss(
-                            r_img, r_disp / self.smooth_scale, self.smooth_beta
-                        )
-                        * self.smooth_weight
+
+                r_smooth_loss = (
+                    self.get_smooth_loss(
+                        r_img, r_disp / self.smooth_scale, self.smooth_beta
                     )
+                    if self.use_dual_transform
+                    else 0.0
+                )
+
+                i_loss += self.smooth_weight * (l_smooth_loss + r_smooth_loss)
 
             if self.use_consist_loss:
-                i_loss += (
+                l_consist_loss = self.get_reconstruct_loss(
+                    l_disp, r_disp, l_disp, self.margin_ratio, self.recon_alpha
+                )
+
+                r_consist_loss = (
                     self.get_reconstruct_loss(
-                        l_disp,
-                        r_disp,
-                        l_disp,
+                        r_disp.flip(-1),
+                        l_disp.flip(-1),
+                        r_disp.flip(-1),
                         self.margin_ratio,
                         self.recon_alpha,
                     )
-                    * self.consist_weight
+                    if self.use_dual_transform
+                    else 0.0
                 )
-                if self.use_dual_transform:
-                    i_loss += (
-                        self.get_reconstruct_loss(
-                            r_disp.flip(-1),
-                            l_disp.flip(-1),
-                            r_disp.flip(-1),
-                            self.margin_ratio,
-                            self.recon_alpha,
-                        )
-                        * self.consist_weight
-                    )
+
+                i_loss += self.consist_weight * (l_consist_loss + r_consist_loss)
 
             loss += i_weight * i_loss
         return loss
