@@ -279,6 +279,16 @@ class AdaptiveLoss(nn.Module):
         ) / 2.0
 
     def forward(self, l_img, r_img, l_disps, r_disps, l_occ=None, r_occ=None):
+        def rgb_to_gray(rgb):
+            return (
+                0.299 * rgb[:, 0, :, :]
+                + 0.587 * rgb[:, 1, :, :]
+                + 0.114 * rgb[:, 2, :, :]
+            ).unsqueeze(1)
+
+        l_img_gray = rgb_to_gray(l_img)
+        r_img_gray = rgb_to_gray(r_img)
+
         loss = 0.0
 
         n_samples = len(l_disps)
@@ -293,13 +303,18 @@ class AdaptiveLoss(nn.Module):
 
             if self.use_recon_loss:
                 l_recon_loss = self.get_reconstruct_loss(
-                    l_img, r_img, l_disp, self.margin_ratio, self.recon_alpha, l_occ
+                    l_img_gray,
+                    r_img_gray,
+                    l_disp,
+                    self.margin_ratio,
+                    self.recon_alpha,
+                    l_occ,
                 )
 
                 r_recon_loss = (
                     self.get_reconstruct_loss(
-                        r_img.flip(-1),
-                        l_img.flip(-1),
+                        r_img_gray.flip(-1),
+                        l_img_gray.flip(-1),
                         r_disp.flip(-1),
                         self.margin_ratio,
                         self.recon_alpha,
@@ -312,12 +327,12 @@ class AdaptiveLoss(nn.Module):
 
             if self.use_smooth_loss:
                 l_smooth_loss = self.get_smooth_loss(
-                    l_img, l_disp / self.smooth_scale, self.smooth_beta
+                    l_img_gray, l_disp / self.smooth_scale, self.smooth_beta
                 )
 
                 r_smooth_loss = (
                     self.get_smooth_loss(
-                        r_img, r_disp / self.smooth_scale, self.smooth_beta
+                        r_img_gray, r_disp / self.smooth_scale, self.smooth_beta
                     )
                     if self.use_dual_transform
                     else 0.0

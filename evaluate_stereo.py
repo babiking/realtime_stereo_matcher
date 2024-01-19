@@ -9,16 +9,17 @@ from tqdm import tqdm
 from model import build_model
 import dataset.stereo_datasets as datasets
 from dataset.input_padder import InputPadder
+from loss.loss import AdaptiveLoss
 import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/opencv_sgbm_config.json",
+    "configure/stereo_net_config_v3_adaptive.json",
     "experiment configure json file",
 )
 gflags.DEFINE_string(
     "model_chkpt_file",
-    "experiments/BASE_STEREO_NET_V4/checkpoints/BASE_STEREO_NET_V4-epoch-200000.pth.gz",
+    "experiments/200K_STEREO_NET_V3/checkpoints/200K_STEREO_NET_V3-epoch-200000.pth.gz",
     "model checkpont file",
 )
 
@@ -214,7 +215,14 @@ def validate_things(model, mixed_prec=False):
 
 @torch.no_grad()
 def validate_middlebury(model, split="F", mixed_prec=False):
+    def rgb_to_gray(rgb):
+        return (
+            0.299 * rgb[:, 0, :, :] + 0.587 * rgb[:, 1, :, :] + 0.114 * rgb[:, 2, :, :]
+        ).unsqueeze(1)
+
     """Peform validation using the Middlebury-V3 dataset"""
+    loss = AdaptiveLoss(use_dual_transform=False)
+
     model.eval()
     aug_params = {}
     val_dataset = datasets.Middlebury(aug_params, split=split)
@@ -234,12 +242,34 @@ def validate_middlebury(model, split="F", mixed_prec=False):
             end = time.time()
         flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
 
+        image1 = rgb_to_gray(padder.unpad(image1).cpu())
+        image2 = rgb_to_gray(padder.unpad(image2).cpu())
+        l1_diff = loss.get_reconstruct_loss(
+            image1,
+            image2,
+            -flow_pr.unsqueeze(0),
+            0.1,
+            1.0,
+            (valid_gt < 0.5).unsqueeze(0),
+        )
+        ssim = loss.get_reconstruct_loss(
+            image1,
+            image2,
+            -flow_pr.unsqueeze(0),
+            0.1,
+            0.0,
+            (valid_gt < 0.5).unsqueeze(0),
+        )
+        logging.info(
+            f"MIDDLEBURY {val_id+1} out of {len(val_dataset)}. L1={l1_diff.item():.4f}, SSIM={ssim.item():.4f}."
+        )
+
         assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
         epe = torch.sum((flow_pr - flow_gt) ** 2, dim=0).sqrt()
 
         epe_flattened = epe.flatten()
         val = (
-            (valid_gt.reshape(-1) >= -0.5)
+            (valid_gt.reshape(-1) >= 0.5)
             & (flow_gt[0].reshape(-1) > -1000)
             & (torch.isnan(flow_pr.flatten()) == 0)
             & (flow_pr.flatten() < 0.0)
@@ -257,9 +287,10 @@ def validate_middlebury(model, split="F", mixed_prec=False):
         ]
         image_epe = epe_flattened[val].mean().item()
         image_fps = 1.0 / (end - start)
-        logging.info(
-            f"MIDDLEBURY {val_id+1} out of {len(val_dataset)}. EPE: {image_epe:.4f}, D1: {image_out[1]:.4f}, FPS: {image_fps:.4f}."
-        )
+        # logging.info(f"MIDDLEBURY {val_id+1} out of {len(val_dataset)}, {imageL_file}.")
+        # logging.info(
+        #     f"MIDDLEBURY {val_id+1} out of {len(val_dataset)}. EPE: {image_epe:.4f}, D1: {image_out[1]:.4f}, FPS: {image_fps:.4f}."
+        # )
         epe_list.append(image_epe)
         out_list.append(image_out)
         fps_list.append(image_fps)
