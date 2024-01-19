@@ -242,7 +242,8 @@ class AdaptiveLoss(nn.Module):
 
         l_img_warp = self.warp_by_flow_map(r_img, l_disp)
         if l_occ is not None:
-            l_img_warp[l_occ] = l_img[l_occ]
+            l_occ_repeat = l_occ.unsqueeze(1).repeat([1, c, 1, 1])
+            l_img_warp[l_occ_repeat] = l_img[l_occ_repeat]
 
         ssim = torch.mean(
             self.calculate_average_SSIM(

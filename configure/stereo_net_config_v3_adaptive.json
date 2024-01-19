@@ -2,31 +2,32 @@
     "name": "ADAPTIVE_STAGE_1_STEREO_NET_V3",
     "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/ADAPTIVE_STAGE_1_STEREO_NET_V3",
     "train": {
-        "batch_size": 6,
+        "batch_size": 1,
         "restore_checkpoint": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/200K_STEREO_NET_V3/checkpoints/200K_STEREO_NET_V3-epoch-200000.pth.gz",
         "save_checkpoint_frequency": 100,
         "datasets": [
             "middlebury_Q"
         ],
-        "learn_rate": 0.00002,
+        "learn_rate": 0.0002,
         "num_of_steps": 5000,
         "weight_decay": 0.00001,
         "loss": {
             "type": "AdaptiveLoss",
             "parameters": {
-                "use_recon_loss": false,
+                "use_recon_loss": true,
                 "use_smooth_loss": false,
-                "use_consist_loss": true,
+                "use_consist_loss": false,
+                "use_dual_transform": false,
                 "recon_alpha": 0.85,
-                "ssim_win_size": 11,
-                "ssim_sigma": 1.5,
                 "ssim_c1": 0.0001,
                 "ssim_c2": 0.0009,
                 "smooth_beta": 1.0,
-                "recon_weight": 1.0,
-                "smooth_weight": 1.0,
-                "consist_weight": 1.0,
-                "loss_gamma": 0.7
+                "smooth_scale": 20.0,
+                "recon_weight": 0.01,
+                "smooth_weight": 10.0,
+                "consist_weight": 0.1,
+                "loss_gamma": 0.7,
+                "margin_ratio": 0.1
             }
         }
     },
@@ -53,8 +54,8 @@
     },
     "data": {
         "image_size": [
-            240,
-            320
+            480,
+            640
         ],
         "image_gamma": [],
         "spatial_scale": [
