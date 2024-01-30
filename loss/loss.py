@@ -245,18 +245,15 @@ class AdaptiveLoss(nn.Module):
             l_occ_repeat = l_occ.unsqueeze(1).repeat([1, c, 1, 1])
             l_img_warp[l_occ_repeat] = l_img[l_occ_repeat]
 
-        ssim = torch.mean(
-            self.calculate_average_SSIM(
-                l_img[:, :, :, margin:],
-                l_img_warp[:, :, :, margin:],
-                c1=self.ssim_c1,
-                c2=self.ssim_c2,
-            )
+        ssim = self.calculate_average_SSIM(
+            l_img[:, :, :, margin:],
+            l_img_warp[:, :, :, margin:],
+            c1=self.ssim_c1,
+            c2=self.ssim_c2,
         )
-        l1_diff = torch.mean(
-            torch.abs(l_img[:, :, :, margin:] - l_img_warp[:, :, :, margin:])
-        )
-        loss = alpha * ssim + (1.0 - alpha) * l1_diff
+
+        l1_diff = torch.abs(l_img[:, :, :, margin:] - l_img_warp[:, :, :, margin:])
+        loss = alpha * ssim.mean() + (1.0 - alpha) * l1_diff.mean()
         return loss
 
     def get_smooth_loss(self, img, disp, beta):
