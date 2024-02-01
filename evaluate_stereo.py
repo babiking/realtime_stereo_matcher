@@ -1,4 +1,5 @@
 from __future__ import print_function, division
+import os
 import sys
 import time
 import json
@@ -52,14 +53,12 @@ def validate_eth3d(model, mixed_prec=False):
             end = time.time()
         flow_pr = padder.unpad(flow_pr.float()).cpu().squeeze(0)
         assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
-        epe = torch.sum((flow_pr - flow_gt) ** 2, dim=0).sqrt()
+        epe = torch.sum((flow_pr - flow_gt)**2, dim=0).sqrt()
 
         epe_flattened = epe.flatten()
-        val = (
-            (valid_gt.flatten() >= 0.5)
-            & (torch.isnan(flow_pr.flatten()) == 0)
-            & (flow_pr.flatten() < 0.0)
-        )
+        val = ((valid_gt.flatten() >= 0.5)
+               & (torch.isnan(flow_pr.flatten()) == 0)
+               & (flow_pr.flatten() < 0.0))
         out_0_5 = epe_flattened > 0.5
         out_1_0 = epe_flattened > 1.0
         out_3_0 = epe_flattened > 3.0
@@ -93,8 +92,7 @@ def validate_eth3d(model, mixed_prec=False):
 
     print(
         "Validation ETH3D: EPE=%.4f, bad0.5=%.4f, bad1.0=%.4f, bad3.0=%.4f, bad5.0=%.4f, FPS=%.4f"
-        % (epe, bads[0], bads[1], bads[2], bads[3], fps)
-    )
+        % (epe, bads[0], bads[1], bads[2], bads[3], fps))
     return {
         "eth3d-epe": epe,
         "eth3d-bad0.5": bads[0],
@@ -130,14 +128,12 @@ def validate_kitti(model, mixed_prec=False):
         flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
 
         assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
-        epe = torch.sum((flow_pr - flow_gt) ** 2, dim=0).sqrt()
+        epe = torch.sum((flow_pr - flow_gt)**2, dim=0).sqrt()
 
         epe_flattened = epe.flatten()
-        val = (
-            (valid_gt.flatten() >= 0.5)
-            & (torch.isnan(flow_pr.flatten()) == 0)
-            & (flow_pr.flatten() < 0.0)
-        )
+        val = ((valid_gt.flatten() >= 0.5)
+               & (torch.isnan(flow_pr.flatten()) == 0)
+               & (flow_pr.flatten() < 0.0))
 
         out = epe_flattened > 1.0
         image_out = out[val].float().mean().item()
@@ -167,9 +163,8 @@ def validate_kitti(model, mixed_prec=False):
 def validate_things(model, mixed_prec=False):
     """Peform validation using the FlyingThings3D (TEST) split"""
     model.eval()
-    val_dataset = datasets.SceneFlowDatasets(
-        dstype="frames_finalpass", things_test=True
-    )
+    val_dataset = datasets.SceneFlowDatasets(dstype="frames_finalpass",
+                                             things_test=True)
 
     out_list, epe_list, fps_list = [], [], []
     for val_id in tqdm(range(len(val_dataset))):
@@ -186,15 +181,13 @@ def validate_things(model, mixed_prec=False):
             end = time.time()
         flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
         assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
-        epe = torch.sum((flow_pr - flow_gt) ** 2, dim=0).sqrt()
+        epe = torch.sum((flow_pr - flow_gt)**2, dim=0).sqrt()
 
         epe = epe.flatten()
-        val = (
-            (valid_gt.flatten() >= 0.5)
-            & (flow_gt.abs().flatten() < 192)
-            & (torch.isnan(flow_pr.flatten()) == 0)
-            & (flow_pr.flatten() < 0.0)
-        )
+        val = ((valid_gt.flatten() >= 0.5)
+               & (flow_gt.abs().flatten() < 192)
+               & (torch.isnan(flow_pr.flatten()) == 0)
+               & (flow_pr.flatten() < 0.0))
 
         out = epe > 1.0
         epe_list.append(epe[val].mean().item())
@@ -215,10 +208,10 @@ def validate_things(model, mixed_prec=False):
 
 @torch.no_grad()
 def validate_middlebury(model, split="F", mixed_prec=False):
+
     def rgb_to_gray(rgb):
-        return (
-            0.299 * rgb[:, 0, :, :] + 0.587 * rgb[:, 1, :, :] + 0.114 * rgb[:, 2, :, :]
-        ).unsqueeze(1)
+        return (0.299 * rgb[:, 0, :, :] + 0.587 * rgb[:, 1, :, :] +
+                0.114 * rgb[:, 2, :, :]).unsqueeze(1)
 
     """Peform validation using the Middlebury-V3 dataset"""
     loss = AdaptiveLoss(use_dual_transform=False)
@@ -229,7 +222,13 @@ def validate_middlebury(model, split="F", mixed_prec=False):
 
     out_list, epe_list, fps_list = [], [], []
     for val_id in range(len(val_dataset)):
-        (imageL_file, _, _), image1, image2, flow_gt, valid_gt = val_dataset[val_id]
+        (imageL_file, _,
+         _), image1, image2, flow_gt, valid_gt = val_dataset[val_id]
+
+        image_name = os.path.basename(os.path.dirname(imageL_file))
+        # if image_name in ["ArtL", "Jadeplant", "MotorcycleE", "Piano", "PianoL"]:
+        #     continue
+
         image1 = image1[None].cuda()
         image2 = image2[None].cuda()
 
@@ -260,20 +259,26 @@ def validate_middlebury(model, split="F", mixed_prec=False):
             0.0,
             (valid_gt < 0.5).unsqueeze(0),
         )
-        logging.info(
-            f"MIDDLEBURY {val_id+1} out of {len(val_dataset)}. L1={l1_diff.item():.4f}, SSIM={ssim.item():.4f}."
-        )
+        # import cv2 as cv
+        # image1_warp = loss.warp_by_flow_map(image2, flow=-flow_gt.unsqueeze(0))
+        # image1_warp[(valid_gt < 0.5).unsqueeze(0).unsqueeze(0)] = image1[(valid_gt < 0.5).unsqueeze(0).unsqueeze(0)]
+        # image1_l1 = np.abs((image1 - image1_warp).cpu().detach().numpy().squeeze())
+        # cv.imwrite(f"{image_name}_L.png",
+        #            image1.cpu().detach().numpy().squeeze())
+        # cv.imwrite(f"{image_name}_RW.png",
+        #            image1_warp.cpu().detach().numpy().squeeze())
+        # cv.imwrite(
+        #     f"{image_name}_DIFF.png",
+        #     cv.applyColorMap(image1_l1.astype(np.uint8), cv.COLORMAP_INFERNO))
 
         assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
-        epe = torch.sum((flow_pr - flow_gt) ** 2, dim=0).sqrt()
+        epe = torch.sum((flow_pr - flow_gt)**2, dim=0).sqrt()
 
         epe_flattened = epe.flatten()
-        val = (
-            (valid_gt.reshape(-1) >= 0.5)
-            & (flow_gt[0].reshape(-1) > -1000)
-            & (torch.isnan(flow_pr.flatten()) == 0)
-            & (flow_pr.flatten() < 0.0)
-        )
+        val = ((valid_gt.reshape(-1) >= 0.5)
+               & (flow_gt[0].reshape(-1) > -1000)
+               & (torch.isnan(flow_pr.flatten()) == 0)
+               & (flow_pr.flatten() < 0.0))
 
         out_0_5 = epe_flattened > 0.5
         out_1_0 = epe_flattened > 1.0
@@ -288,9 +293,9 @@ def validate_middlebury(model, split="F", mixed_prec=False):
         image_epe = epe_flattened[val].mean().item()
         image_fps = 1.0 / (end - start)
         # logging.info(f"MIDDLEBURY {val_id+1} out of {len(val_dataset)}, {imageL_file}.")
-        # logging.info(
-        #     f"MIDDLEBURY {val_id+1} out of {len(val_dataset)}. EPE: {image_epe:.4f}, D1: {image_out[1]:.4f}, FPS: {image_fps:.4f}."
-        # )
+        logging.info(
+            f"MIDDLEBURY {val_id+1} out of {len(val_dataset)}. EPE: {image_epe:.4f}, D1: {image_out[1]:.4f}, L1={l1_diff.item():.4f}, SSIM={ssim.item():.4f}, FPS: {image_fps:.4f}."
+        )
         epe_list.append(image_epe)
         out_list.append(image_out)
         fps_list.append(image_fps)
@@ -305,8 +310,7 @@ def validate_middlebury(model, split="F", mixed_prec=False):
 
     print(
         "Validation Middlebury: EPE=%.4f, bad0.5=%.4f, bad1.0=%.4f, bad3.0=%.4f, bad5.0=%.4f, FPS=%.4f"
-        % (epe, bads[0], bads[1], bads[2], bads[3], fps)
-    )
+        % (epe, bads[0], bads[1], bads[2], bads[3], fps))
     return {
         "middlebury-epe": epe,
         "middlebury-bad0.5": bads[0],
@@ -323,14 +327,14 @@ def main():
 
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
+        format=
+        "%(asctime)s %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
     )
 
     exp_config = json.load(open(FLAGS.exp_config_json, "r"))
 
     model = torch.nn.DataParallel(build_model(exp_config["model"])).to(
-        torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    )
+        torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     model.cuda()
     model.eval()
@@ -357,7 +361,8 @@ def main():
         elif dataset == "kitti":
             validate_kitti(model, mixed_prec=use_mixed_precision)
 
-        elif dataset in ([f"middlebury_{s}" for s in "FHQ"] + ["middlebury_2014"]):
+        elif dataset in ([f"middlebury_{s}"
+                          for s in "FHQ"] + ["middlebury_2014"]):
             validate_middlebury(
                 model,
                 split=dataset.split("_")[-1],
