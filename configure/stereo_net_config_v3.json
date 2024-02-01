@@ -1,6 +1,6 @@
 {
-    "name": "SEQUENCE_STEREO_NET_V3",
-    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/SEQUENCE_STEREO_NET_V3",
+    "name": "GWC_STEREO_NET_V3",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/GWC_STEREO_NET_V3",
     "train": {
         "batch_size": 8,
         "restore_checkpoint": "",
@@ -42,7 +42,9 @@
                 1,
                 1
             ],
-            "hidden_dim": 32
+            "hidden_dim": 32,
+            "use_groupwise_cost": true,
+            "num_groups": 8
         }
     },
     "data": {
