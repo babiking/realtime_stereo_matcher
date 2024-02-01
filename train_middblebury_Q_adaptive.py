@@ -2,10 +2,12 @@ from __future__ import print_function, division
 
 import os
 import sys
+import csv
 import json
 import logging
 import numpy as np
-from tqdm import tqdm
+import cv2 as cv
+from tools.colorize import colorize_2d_matrix
 
 from torch.utils.tensorboard import SummaryWriter
 import torch
@@ -141,42 +143,54 @@ def train(exp_config):
 
     loss_func = build_loss_function(exp_config["train"]["loss"])
 
-    train_loader = datasets.fetch_dataloader(exp_config)
     optimizer, scheduler = fetch_optimizer(exp_config, model)
     total_steps = 0
-    logger = Logger(model, scheduler, log_dir=os.path.join(exp_config["path"], "runs"))
+    logger = Logger(
+        model, scheduler, log_dir=os.path.join(exp_config["path"], "runs")
+    )
 
     model.cuda()
     model.train()
     initialize(model.module)
 
-    restore_ckpt = exp_config["train"]["restore_checkpoint"]
-    if restore_ckpt is not None and len(restore_ckpt) > 0:
-        assert restore_ckpt.endswith(".pth") or restore_ckpt.endswith(".pth.gz")
-        logging.info(f"Model loading checkpoint from {restore_ckpt}...")
-        model.load_state_dict(
-            torch.load(exp_config["train"]["restore_checkpoint"]), strict=True
-        )
-        logging.info(f"Done loading checkpoint.")
-
     scaler = GradScaler(enabled=exp_config["model"].get("mixed_precision", False))
+
+    model.load_state_dict(
+        torch.load(exp_config["train"]["restore_checkpoint"]), strict=True
+    )
+
+    dataset = datasets.Middlebury(aug_params={}, phase="training", split="Q")
 
     should_keep_training = True
     global_batch_num = 0
     while should_keep_training:
-        for i_batch, (_, *data_blob) in enumerate(tqdm(train_loader)):
+        for i in range(len(dataset)):
             optimizer.zero_grad()
-            l_img, r_img, flow, valid = [x.cuda() for x in data_blob]
 
-            l_img_flip = torch.flip(l_img, dims=[-1])
-            r_img_flip = torch.flip(r_img, dims=[-1])
+            img_files, l_img, r_img, flow, valid = dataset[i]
+            l_img_file, r_img_file, l_disp_file = img_files
+
+            img_name = os.path.basename(os.path.dirname(l_img_file))
+
+            if img_name in ["ArtL", "Jadeplant", "MotorcycleE", "Piano", "PianoL"]:
+                continue
+
+            l_img = l_img.cuda().unsqueeze(0)
+            r_img = r_img.cuda().unsqueeze(0)
+            flow = flow.cuda().unsqueeze(0)
+            valid = valid.cuda().unsqueeze(0)
 
             l_disps = model(l_img, r_img)
-            r_disps = [torch.flip(x, dims=[-1]) for x in model(r_img_flip, l_img_flip)]
-
-            # AdaptiveLoss left disparity > 0 and right disparity < 0
-            loss = loss_func(l_img, r_img, [-1.0 * l_disps[-1]], [r_disps[-1]])
+            loss = loss_func(
+                l_img,
+                r_img,
+                [-1.0 * l_disps[-1]],
+                [None],
+                l_occ=(valid < 0.5),
+                r_occ=None,
+            )
             metrics = get_flow_map_metrics(flow, l_disps[-1], valid)
+            metrics["loss"] = round(loss.item(), 4)
             logger.writer.add_scalar("live_loss", loss.item(), global_batch_num)
             logger.writer.add_scalar(
                 f"learning_rate", optimizer.param_groups[0]["lr"], global_batch_num
@@ -207,14 +221,6 @@ def train(exp_config):
                 os.makedirs(os.path.dirname(save_ckpt_file), exist_ok=True)
                 logging.info(f"Saving file {save_ckpt_file}...")
                 torch.save(model.state_dict(), save_ckpt_file)
-
-    logging.info("FINISHED TRAINING!")
-    logger.close()
-    final_ckpt_file = os.path.join(
-        exp_path, f"checkpoints/{exp_name}-epoch-{total_steps}.pth.gz"
-    )
-    torch.save(model.state_dict(), final_ckpt_file)
-    return final_ckpt_file
 
 
 def main():

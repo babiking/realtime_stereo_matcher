@@ -1,21 +1,18 @@
 {
-    "name": "ADAPTIVE_STAGE_1_STEREO_NET_V3",
-    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/ADAPTIVE_STAGE_1_STEREO_NET_V3",
+    "name": "ADAPTIVE_MONO_RECON_SMOOTH_JOIN",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/ADAPTIVE_MONO_RECON_SMOOTH_JOIN",
     "train": {
         "batch_size": 1,
         "restore_checkpoint": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/200K_STEREO_NET_V3/checkpoints/200K_STEREO_NET_V3-epoch-200000.pth.gz",
-        "save_checkpoint_frequency": 100,
-        "datasets": [
-            "middlebury_Q"
-        ],
-        "learn_rate": 0.0002,
-        "num_of_steps": 5000,
+        "save_checkpoint_frequency": 500,
+        "learn_rate": 0.00001,
+        "num_of_steps": 2000,
         "weight_decay": 0.00001,
         "loss": {
             "type": "AdaptiveLoss",
             "parameters": {
                 "use_recon_loss": true,
-                "use_smooth_loss": false,
+                "use_smooth_loss": true,
                 "use_consist_loss": false,
                 "use_dual_transform": false,
                 "recon_alpha": 0.85,
@@ -23,9 +20,9 @@
                 "ssim_c2": 0.0009,
                 "smooth_beta": 1.0,
                 "smooth_scale": 20.0,
-                "recon_weight": 0.01,
-                "smooth_weight": 10.0,
-                "consist_weight": 0.1,
+                "recon_weight": 1.0,
+                "smooth_weight": 300.0,
+                "consist_weight": 1.0,
                 "loss_gamma": 0.7,
                 "margin_ratio": 0.1
             }
@@ -51,22 +48,5 @@
             ],
             "hidden_dim": 32
         }
-    },
-    "data": {
-        "image_size": [
-            480,
-            640
-        ],
-        "image_gamma": [],
-        "spatial_scale": [
-            -0.2,
-            0.4
-        ],
-        "saturation_range": [
-            0,
-            1.4
-        ],
-        "do_flip": false,
-        "no_y_jitter": true
     }
 }
