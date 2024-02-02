@@ -71,12 +71,14 @@ class BaseFeatureExtract(nn.Module):
 
 class UNetFeatureExtract(BaseFeatureExtract):
 
-    def __init__(self, hidden_dims, use_pretrain=False, use_init_weight=True):
-        super(UNetFeatureExtract).__init__(
-            hidden_dims,
-            use_pretrain,
-            use_init_weight,
-        )
+    def __init__(self,
+                 hidden_dims,
+                 use_pretrain=False,
+                 use_init_weight=True,
+                 *args,
+                 **kwargs):
+        super(UNetFeatureExtract).__init__(\
+            hidden_dims, use_pretrain, use_init_weight, *args, **kwargs)
 
         self.down_layers = nn.ModuleList([])
         self.up_layers = nn.ModuleList([])
