@@ -5,17 +5,17 @@ import torch.nn.functional as F
 
 def cost_volume_factory(config):
     cost_type = config["type"]
-    if cost_type == "difference":
-        return DifferenceCostVolume(**config["arguments"])
-    elif cost_type == "groupwise":
-        return GroupwiseCostVolume(**config["arguments"])
-    elif cost_type == "concat":
-        return ConcatCostVolume(**config["arguments"])
+    if cost_type == "difference_3d":
+        return DifferenceCostVolume3D(**config["arguments"])
+    elif cost_type == "groupwise_3d":
+        return GroupwiseCostVolume3D(**config["arguments"])
+    elif cost_type == "concat_3d":
+        return ConcatCostVolume3D(**config["arguments"])
     else:
         raise NotImplementedError(f"invalid cost volume type: {cost_type}!")
 
 
-class BaseCostVolume(nn.Module):
+class BaseCostVolume3D(nn.Module):
 
     def __init__(self, max_disp, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -56,7 +56,7 @@ class BaseCostVolume(nn.Module):
         return volume
 
 
-class DifferenceCostVolume(BaseCostVolume):
+class DifferenceCostVolume3D(BaseCostVolume3D):
 
     def __init__(self, max_disp, *args, **kwargs) -> None:
         super().__init__(max_disp, *args, **kwargs)
@@ -74,7 +74,7 @@ class DifferenceCostVolume(BaseCostVolume):
         return cost
 
 
-class GroupwiseCostVolume(BaseCostVolume):
+class GroupwiseCostVolume3D(BaseCostVolume3D):
 
     def __init__(self, max_disp, num_groups, *args, **kwargs) -> None:
         super().__init__(max_disp, *args, **kwargs)
@@ -92,7 +92,7 @@ class GroupwiseCostVolume(BaseCostVolume):
         return cost
 
 
-class ConcatCostVolume(BaseCostVolume):
+class ConcatCostVolume3D(BaseCostVolume3D):
 
     def __init__(self, max_disp, *args, **kwargs) -> None:
         super().__init__(max_disp, *args, **kwargs)
