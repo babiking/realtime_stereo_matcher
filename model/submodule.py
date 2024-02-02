@@ -106,6 +106,56 @@ class WarpHead(nn.Module):
         return warped
 
 
+def get_norm2d(out_dim, norm_type, channels_per_group=8):
+    if norm_type == "group":
+        return nn.GroupNorm(num_groups=(out_dim // channels_per_group),
+                            num_channels=out_dim)
+    elif norm_type == "batch":
+        return nn.BatchNorm2d(out_dim)
+    elif norm_type == "instance":
+        return nn.InstanceNorm2d(out_dim)
+    elif norm_type == "none":
+        return nn.Sequential()
+    else:
+        raise NotImplementedError(f"invalid norm type: {norm_type}!")
+
+
+def get_conv2d_3x3(in_dim,
+                   out_dim,
+                   stride,
+                   dilation,
+                   norm_type,
+                   channels_per_group=8,
+                   use_relu=True):
+    conv = nn.Conv2d(in_dim,
+                     out_dim,
+                     kernel_size=3,
+                     stride=stride,
+                     padding=dilation,
+                     dilation=dilation)
+    norm = get_norm2d(out_dim, norm_type, channels_per_group)
+    relu = nn.ReLU() if use_relu else nn.Sequential()
+    return nn.Sequential([conv, norm, relu])
+
+
+def get_conv2d_1x1(in_dim,
+                   out_dim,
+                   stride,
+                   dilation,
+                   norm_type,
+                   channels_per_group=8,
+                   use_relu=True):
+    conv = nn.Conv2d(in_dim,
+                     out_dim,
+                     kernel_size=1,
+                     stride=stride,
+                     padding=0,
+                     dilation=dilation)
+    norm = get_norm2d(out_dim, norm_type, channels_per_group)
+    relu = nn.ReLU() if use_relu else nn.Sequential()
+    return nn.Sequential([conv, norm, relu])
+
+
 class ResidualBlock(nn.Module):
 
     def __init__(self,
@@ -124,25 +174,25 @@ class ResidualBlock(nn.Module):
         self.dilation = dilation
         self.channels_per_group = channels_per_group
 
-        self.conv1 = self.get_conv2d_3x3(in_dim=in_dim,
-                                         out_dim=out_dim,
-                                         stride=stride,
-                                         dilation=dilation,
-                                         norm_type=norm_type,
-                                         channels_per_group=channels_per_group,
-                                         use_relu=True)
-        self.conv2 = self.get_conv2d_3x3(in_dim=out_dim,
-                                         out_dim=out_dim,
-                                         stride=1,
-                                         dilation=dilation,
-                                         norm_type=norm_type,
-                                         channels_per_group=channels_per_group,
-                                         use_relu=True)
+        self.conv1 = get_conv2d_3x3(in_dim=in_dim,
+                                    out_dim=out_dim,
+                                    stride=stride,
+                                    dilation=dilation,
+                                    norm_type=norm_type,
+                                    channels_per_group=channels_per_group,
+                                    use_relu=True)
+        self.conv2 = get_conv2d_3x3(in_dim=out_dim,
+                                    out_dim=out_dim,
+                                    stride=1,
+                                    dilation=dilation,
+                                    norm_type=norm_type,
+                                    channels_per_group=channels_per_group,
+                                    use_relu=True)
 
         if stride == 1 and in_dim == out_dim:
             self.downsample = None
         else:
-            self.downsample = self.get_conv2d_1x1(
+            self.downsample = get_conv2d_1x1(
                 in_dim=in_dim,
                 out_dim=out_dim,
                 stride=stride,
@@ -152,55 +202,6 @@ class ResidualBlock(nn.Module):
                 use_relu=False)
 
         self.relu = nn.ReLU()
-
-    def get_conv2d_3x3(self,
-                       in_dim,
-                       out_dim,
-                       stride,
-                       dilation,
-                       norm_type,
-                       channels_per_group=8,
-                       use_relu=True):
-        conv = nn.Conv2d(in_dim,
-                         out_dim,
-                         kernel_size=3,
-                         stride=stride,
-                         padding=dilation,
-                         dilation=dilation)
-        norm = self.get_norm2d(out_dim, norm_type, channels_per_group)
-        relu = nn.ReLU() if use_relu else nn.Sequential()
-        return nn.Sequential([conv, norm, relu])
-
-    def get_conv2d_1x1(self,
-                       in_dim,
-                       out_dim,
-                       stride,
-                       dilation,
-                       norm_type,
-                       channels_per_group=8,
-                       use_relu=True):
-        conv = nn.Conv2d(in_dim,
-                         out_dim,
-                         kernel_size=1,
-                         stride=stride,
-                         padding=0,
-                         dilation=dilation)
-        norm = self.get_norm2d(out_dim, norm_type, channels_per_group)
-        relu = nn.ReLU() if use_relu else nn.Sequential()
-        return nn.Sequential([conv, norm, relu])
-
-    def get_norm2d(self, out_dim, norm_type, channels_per_group=8):
-        if norm_type == "group":
-            return nn.GroupNorm(num_groups=(out_dim // channels_per_group),
-                                num_channels=out_dim)
-        elif norm_type == "batch":
-            return nn.BatchNorm2d(out_dim)
-        elif norm_type == "instance":
-            return nn.InstanceNorm2d(out_dim)
-        elif norm_type == "none":
-            return nn.Sequential()
-        else:
-            raise NotImplementedError(f"invalid norm type: {norm_type}!")
 
     def forward(self, x):
         y = x
