@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from model.submodule import *
 
 
-def refine_net_factory(config):
+def disparity_refine_factory(config):
     refine_type = config["type"]
     if refine_type == "dilate":
         return DilateRefineNet(**config["arguments"])
