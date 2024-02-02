@@ -15,8 +15,7 @@ class MobileStereoBase(nn.Module):
 
         self.model_config = model_config
 
-        self.model_name = model_config["global"]["model_name"]
-        self.max_disp = model_config["global"]["max_disparity"]
+        self.model_name = model_config["model_name"]
 
         self.extract = feature_extract_factory(model_config["feature_extract"])
         self.down_factor = self.extract.get_down_factor()
