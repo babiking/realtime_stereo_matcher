@@ -51,8 +51,7 @@ class BaseFeatureExtract(nn.Module):
 class UNetFeatureExtract(BaseFeatureExtract):
 
     def __init__(self, hidden_dims, use_pretrain=False, *args, **kwargs):
-        super(UNetFeatureExtract).__init__(\
-            hidden_dims, use_pretrain, *args, **kwargs)
+        super().__init__(hidden_dims, use_pretrain, *args, **kwargs)
 
         self.down_factor = self.get_down_factor()
 

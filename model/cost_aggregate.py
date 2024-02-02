@@ -16,8 +16,6 @@ class BaseCostAggregate3D(nn.Module):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
-        self.aggregate = self.build()
-
     def build(self):
         raise NotImplementedError
 
@@ -31,6 +29,7 @@ class BaseCostAggregate3D(nn.Module):
             Return:
                 [1] cost_volume: N x Cout x D x H x W
         """
+        self.aggregate = self.build()
         return self.aggregate(cost_volume)
 
 

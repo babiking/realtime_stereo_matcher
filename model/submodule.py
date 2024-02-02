@@ -135,7 +135,7 @@ def get_conv2d_3x3(in_dim,
                      dilation=dilation)
     norm = get_norm2d(out_dim, norm_type, channels_per_group)
     relu = nn.ReLU() if use_relu else nn.Sequential()
-    return nn.Sequential([conv, norm, relu])
+    return nn.Sequential(conv, norm, relu)
 
 
 def get_conv2d_1x1(in_dim,
@@ -153,7 +153,7 @@ def get_conv2d_1x1(in_dim,
                      dilation=dilation)
     norm = get_norm2d(out_dim, norm_type, channels_per_group)
     relu = nn.ReLU() if use_relu else nn.Sequential()
-    return nn.Sequential([conv, norm, relu])
+    return nn.Sequential(conv, norm, relu)
 
 
 class ResidualBlock(nn.Module):

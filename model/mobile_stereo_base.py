@@ -63,7 +63,7 @@ class MobileStereoBase(nn.Module):
         cost_volume = self.cost(l_fmaps[0], r_fmaps[0])
         cost_volume = self.aggregate(cost_volume)
 
-        l_disp = self.regress(cost_volume)
+        l_disp = self.regress(cost_volume, self.cost.max_disp)
         l_disp_pyramid = self.refine(l_disp, l_fmaps[1:], r_fmaps[1:])
         l_disp_pyramid = [
             -1.0 * self.upsample(l_disp, l_img.shape[2:])[:, :, :h, :w]
