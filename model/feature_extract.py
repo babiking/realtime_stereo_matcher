@@ -6,7 +6,7 @@ from model.submodule import *
 
 def feature_extract_factory(config):
     extract_type = config["type"]
-    if extract_type == "UNet":
+    if extract_type == "unet":
         return UNetFeatureExtract(**config["arguments"])
     else:
         raise NotImplementedError(
@@ -19,37 +19,16 @@ class BaseFeatureExtract(nn.Module):
         self,
         hidden_dims,
         use_pretrain,
-        use_init_weight,
         *args,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
 
         self.hidden_dims = hidden_dims
-        self.down_factor = len(hidden_dims) - 1
         self.use_pretrain = use_pretrain
-        self.use_init_weight = use_init_weight
 
-    def build(self):
+    def get_down_factor(self):
         raise NotImplementedError
-
-    def align(self, img):
-        n, c, src_h, src_w = img.shape
-
-        divisor = 2**self.down_factor
-
-        h_pad = (divisor - (src_h % divisor)) % divisor
-        w_pad = (divisor - (src_w % divisor)) % divisor
-
-        img = F.pad(img, (0, w_pad, 0, h_pad))
-        return img, src_h, src_w, h_pad, w_pad
-
-    def concat(self, img0, img1, dim=0):
-        return torch.concat([img0, img1], dim=dim)
-
-    def split(self, img, n_splits=2, dim=0):
-        return torch.split(\
-            img, split_size_or_sections=(img.shape[0] // n_splits), dim=dim)
 
     def forward(self, img):
         """
@@ -71,14 +50,11 @@ class BaseFeatureExtract(nn.Module):
 
 class UNetFeatureExtract(BaseFeatureExtract):
 
-    def __init__(self,
-                 hidden_dims,
-                 use_pretrain=False,
-                 use_init_weight=True,
-                 *args,
-                 **kwargs):
+    def __init__(self, hidden_dims, use_pretrain=False, *args, **kwargs):
         super(UNetFeatureExtract).__init__(\
-            hidden_dims, use_pretrain, use_init_weight, *args, **kwargs)
+            hidden_dims, use_pretrain, *args, **kwargs)
+
+        self.down_factor = self.get_down_factor()
 
         self.down_layers = nn.ModuleList([])
         self.up_layers = nn.ModuleList([])
@@ -116,6 +92,9 @@ class UNetFeatureExtract(BaseFeatureExtract):
                                    out_dim=self.hidden_dims[j - 1],
                                    cat_dim=self.hidden_dims[j - 1])
             self.up_layers.append(layer)
+
+    def get_down_factor(self):
+        return len(self.hidden_dims) - 1
 
     def forward(self, x):
         down_pyramid = []
