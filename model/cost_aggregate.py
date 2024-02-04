@@ -65,4 +65,4 @@ class ConvCostAggregate3D(BaseCostAggregate3D):
         return nn.Sequential(*aggregate)
 
     def forward(self, cost_volume):
-        return self.aggregate(cost_volume)
+        return self.aggregate(cost_volume).squeeze(1)
