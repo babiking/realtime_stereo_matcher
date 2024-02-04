@@ -16,9 +16,6 @@ class BaseCostAggregate3D(nn.Module):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
-    def build(self):
-        raise NotImplementedError
-
     def forward(self, cost_volume):
         """
             CostAggregate3D to filter 3D cost volume by an implicit aggregation.
@@ -29,8 +26,7 @@ class BaseCostAggregate3D(nn.Module):
             Return:
                 [1] cost_volume: N x Cout x D x H x W
         """
-        self.aggregate = self.build()
-        return self.aggregate(cost_volume)
+        raise NotImplementedError
 
 
 class ConvCostAggregate3D(BaseCostAggregate3D):
@@ -47,6 +43,8 @@ class ConvCostAggregate3D(BaseCostAggregate3D):
         self.hidden_dims = hidden_dims
         self.out_dim = out_dim
         self.kernel_size = kernel_size
+
+        self.aggregate = self.build()
 
     def build(self):
         aggregate = nn.ModuleList([])
@@ -65,3 +63,6 @@ class ConvCostAggregate3D(BaseCostAggregate3D):
         aggregate.append(\
             nn.Conv3d(self.hidden_dims[-1], self.out_dim, self.kernel_size, 1, 1))
         return nn.Sequential(*aggregate)
+
+    def forward(self, cost_volume):
+        return self.aggregate(cost_volume)
