@@ -28,7 +28,7 @@ gflags.DEFINE_string(
 )
 gflags.DEFINE_string(
     "left",
-    "/mnt/data/workspace/datasets/MiddleburyQBatch/image/*_left_Img.png",
+    "/mnt/data/workspace/datasets/D435I/outdoor_stripe_plane/image/*_left_Img.bmp",
     "left images",
 )
 gflags.DEFINE_list(
@@ -38,7 +38,7 @@ gflags.DEFINE_list(
 )
 gflags.DEFINE_string(
     "output",
-    "/mnt/data/workspace/datasets/MiddleburyQBatch/disparity",
+    "/mnt/data/workspace/datasets/D435I/outdoor_stripe_plane/disparity",
     "output path",
 )
 gflags.DEFINE_boolean("use_onnx_inference", True,

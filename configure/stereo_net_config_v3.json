@@ -1,6 +1,6 @@
 {
-    "name": "GWC_STEREO_NET_V3",
-    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/GWC_STEREO_NET_V3",
+    "name": "200K_STEREO_NET_V3",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/200K_STEREO_NET_V3",
     "train": {
         "batch_size": 8,
         "restore_checkpoint": "",
@@ -43,7 +43,7 @@
                 1
             ],
             "hidden_dim": 32,
-            "use_groupwise_cost": true,
+            "use_groupwise_cost": false,
             "num_groups": 8
         }
     },
