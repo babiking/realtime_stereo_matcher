@@ -127,7 +127,7 @@ class StereoDataset(data.Dataset):
         return len(self.image_list)
 
 
-class RealsenseDatasets(StereoDataset):
+class RealsenseDataset(StereoDataset):
     def __init__(
         self,
         aug_params=None,
@@ -488,13 +488,15 @@ def fetch_dataloader(exp_config):
     for dataset_name in exp_config["train"]["datasets"]:
         new_dataset = []
         if dataset_name == "realsense":
-            new_dataset = RealsenseDatasets(
+            new_dataset = RealsenseDataset(
                 aug_params, data_path="/mnt/data/workspace/datasets/MyRealsense"
             )
+            logging.info(f"Adding {len(new_dataset)} samples from Realsense")
         elif dataset_name.startswith("middlebury_"):
             new_dataset = Middlebury(
                 aug_params, split=dataset_name.replace("middlebury_", "")
             )
+            logging.info(f"Adding {len(new_dataset)} samples from Middlebury")
         elif dataset_name == "sceneflow/things":
             new_dataset = SceneFlowDatasets(
                 aug_params,
