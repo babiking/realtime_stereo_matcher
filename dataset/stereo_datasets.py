@@ -10,6 +10,7 @@ import re
 import copy
 import math
 import random
+import imagesize
 from pathlib import Path
 from glob import glob
 import os.path as osp
@@ -124,6 +125,48 @@ class StereoDataset(data.Dataset):
 
     def __len__(self):
         return len(self.image_list)
+
+
+class RealsenseDatasets(StereoDataset):
+    def __init__(
+        self,
+        aug_params=None,
+        sparse=True,
+        data_path="/mnt/data/workspace/datasets/MyRealsense",
+    ):
+        super().__init__(
+            aug_params, sparse=sparse, reader=frame_utils.readDispRealsense
+        )
+
+        for sub_name in os.listdir(data_path):
+            sub_path = os.path.join(data_path, sub_name)
+
+            if not os.path.isdir(sub_path):
+                continue
+
+            l_img_files = glob(os.path.join(sub_path, "image", "*_off_left_Img.png"))
+
+            for l_img_file in l_img_files:
+                w, h = imagesize.get(l_img_file)
+
+                scene_name, uuid_tag = os.path.basename(l_img_file).split("_")[:2]
+
+                r_img_file = os.path.join(
+                    sub_path, "image", f"{scene_name}_{uuid_tag}_off_right_Img.png"
+                )
+                if not os.path.exists(r_img_file):
+                    continue
+
+                l_disp_file = os.path.join(
+                    sub_path,
+                    "disparity",
+                    f"{scene_name}_{uuid_tag}_on_{w}x{h}_disparity_Img.pfm",
+                )
+                if not os.path.exists(l_disp_file):
+                    continue
+
+                self.image_list += [[l_img_file, r_img_file]]
+                self.disparity_list += [l_disp_file]
 
 
 class SceneFlowDatasets(StereoDataset):
@@ -444,7 +487,11 @@ def fetch_dataloader(exp_config):
     train_dataset = None
     for dataset_name in exp_config["train"]["datasets"]:
         new_dataset = []
-        if dataset_name.startswith("middlebury_"):
+        if dataset_name == "realsense":
+            new_dataset = RealsenseDatasets(
+                aug_params, data_path="/mnt/data/workspace/datasets/MyRealsense"
+            )
+        elif dataset_name.startswith("middlebury_"):
             new_dataset = Middlebury(
                 aug_params, split=dataset_name.replace("middlebury_", "")
             )
