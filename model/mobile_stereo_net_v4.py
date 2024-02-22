@@ -519,6 +519,6 @@ class MobileStereoNetV4(nn.Module):
 
             disp_preds = [pred3]
         
-        disp_preds = [-1.0 * disp.unsqueeze(1) for disp in disp_preds]
+        disp_preds = [disp.unsqueeze(1) for disp in disp_preds]
 
         return disp_preds

@@ -65,7 +65,6 @@ class OpenCVSGBMModule(nn.Module):
             )
             l_disp_i = l_disp_i.astype(np.float32) / 16.0
             l_disp_i = np.clip(l_disp_i, a_min=0.0, a_max=None)
-            l_disp_i *= -1.0
 
             l_disp_i = l_disp_i.reshape(1, 1, h, w)
 

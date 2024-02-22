@@ -384,4 +384,4 @@ class MobileStereoNetV3(nn.Module):
                                      (l_img.shape[2:]))[:, :, :h, :w]
             multi_scale.append(full_res)
 
-        return [-1.0 * flow_map for flow_map in multi_scale]
+        return multi_scale
