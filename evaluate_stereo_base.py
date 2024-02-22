@@ -23,7 +23,9 @@ gflags.DEFINE_string(
     "experiments/TRAINER_BASE_V1/checkpoints/TRAINER_BASE_V1-epoch-200000.pth.gz",
     "model checkpont file",
 )
-gflags.DEFINE_list("test_datasets", ["realsense"], "test datasets for evaluation")
+gflags.DEFINE_list(
+    "test_datasets", ["realsense", "middlebury_Q"], "test datasets for evaluation"
+)
 
 autocast = torch.cuda.amp.autocast
 
@@ -60,7 +62,7 @@ def validate_realsense(model, mixed_prec=False):
         val = (
             (valid_gt.flatten() >= 0.5)
             & (torch.isnan(flow_pr.flatten()) == 0)
-            & (flow_pr.flatten() < 0.0)
+            & (flow_pr.flatten() > 0.0)
         )
         out_0_5 = epe_flattened > 0.5
         out_1_0 = epe_flattened > 1.0
@@ -132,7 +134,7 @@ def validate_eth3d(model, mixed_prec=False):
         val = (
             (valid_gt.flatten() >= 0.5)
             & (torch.isnan(flow_pr.flatten()) == 0)
-            & (flow_pr.flatten() < 0.0)
+            & (flow_pr.flatten() > 0.0)
         )
         out_0_5 = epe_flattened > 0.5
         out_1_0 = epe_flattened > 1.0
@@ -210,7 +212,7 @@ def validate_kitti(model, mixed_prec=False):
         val = (
             (valid_gt.flatten() >= 0.5)
             & (torch.isnan(flow_pr.flatten()) == 0)
-            & (flow_pr.flatten() < 0.0)
+            & (flow_pr.flatten() > 0.0)
         )
 
         out = epe_flattened > 1.0
@@ -267,7 +269,7 @@ def validate_things(model, mixed_prec=False):
             (valid_gt.flatten() >= 0.5)
             & (flow_gt.abs().flatten() < 192)
             & (torch.isnan(flow_pr.flatten()) == 0)
-            & (flow_pr.flatten() < 0.0)
+            & (flow_pr.flatten() > 0.0)
         )
 
         out = epe > 1.0
@@ -326,7 +328,7 @@ def validate_middlebury(model, split="F", mixed_prec=False):
         l1_diff = loss.get_reconstruct_loss(
             image1,
             image2,
-            -flow_pr.unsqueeze(0),
+            flow_pr.unsqueeze(0),
             0.1,
             1.0,
             (valid_gt < 0.5).unsqueeze(0),
@@ -334,7 +336,7 @@ def validate_middlebury(model, split="F", mixed_prec=False):
         ssim = loss.get_reconstruct_loss(
             image1,
             image2,
-            -flow_pr.unsqueeze(0),
+            flow_pr.unsqueeze(0),
             0.1,
             0.0,
             (valid_gt < 0.5).unsqueeze(0),
@@ -359,7 +361,7 @@ def validate_middlebury(model, split="F", mixed_prec=False):
             (valid_gt.reshape(-1) >= 0.5)
             & (flow_gt[0].reshape(-1) > -1000)
             & (torch.isnan(flow_pr.flatten()) == 0)
-            & (flow_pr.flatten() < 0.0)
+            & (flow_pr.flatten() > 0.0)
         )
 
         out_0_5 = epe_flattened > 0.5
@@ -439,13 +441,13 @@ def main():
     for dataset in FLAGS.test_datasets:
         if dataset == "realsense":
             validate_realsense(model, mixed_prec=use_mixed_precision)
-        
+
         elif dataset == "eth3d":
             validate_eth3d(model, mixed_prec=use_mixed_precision)
-        
+
         elif dataset == "kitti":
             validate_kitti(model, mixed_prec=use_mixed_precision)
-        
+
         elif dataset in ([f"middlebury_{s}" for s in "FHQ"] + ["middlebury_2014"]):
             validate_middlebury(
                 model,

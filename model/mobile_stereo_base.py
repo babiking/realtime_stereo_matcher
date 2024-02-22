@@ -66,7 +66,7 @@ class MobileStereoBase(nn.Module):
         l_disp = self.regress(cost_volume, self.cost.max_disp)
         l_disp_pyramid = self.refine(l_disp, l_fmaps[1:], r_fmaps[1:])
         l_disp_pyramid = [
-            -1.0 * self.upsample(l_disp, l_img.shape[2:])[:, :, :h, :w]
+            self.upsample(l_disp, l_img.shape[2:])[:, :, :h, :w]
             for l_disp in l_disp_pyramid
         ]
         return l_disp_pyramid

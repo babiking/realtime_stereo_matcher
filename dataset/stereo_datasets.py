@@ -76,7 +76,7 @@ class StereoDataset(data.Dataset):
         img2 = np.array(img2).astype(np.uint8)
 
         disp = np.array(disp).astype(np.float32)
-        flow = np.stack([-disp, np.zeros_like(disp)], axis=-1)
+        flow = np.stack([disp, np.zeros_like(disp)], axis=-1)
 
         # grayscale images
         if len(img1.shape) == 2:
