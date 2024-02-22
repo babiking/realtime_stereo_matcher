@@ -61,10 +61,10 @@ def export_stereo_model_to_onnx(model, onnx_file, device):
 
     torch.onnx.export(
         model.module,
-        (left, right),
+        (left, right, False),
         onnx_file,
         verbose=False,
-        input_names=["input0", "input1"],
+        input_names=["input0", "input1", "is_train"],
         output_names=["output0"],
         opset_version=16,
     )
@@ -172,7 +172,7 @@ def main():
                 padder = InputPadder(l_img.shape, divis_by=32)
                 l_img, r_img = padder.pad(l_img, r_img)
 
-                flow_pr = model(l_img, r_img)[-1]
+                flow_pr = model(l_img, r_img, is_train=False)[-1]
 
                 flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
             end = time.time()

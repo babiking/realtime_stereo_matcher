@@ -9,7 +9,6 @@ from model.disparity_refine import disparity_refine_factory
 
 
 class MobileStereoBase(nn.Module):
-
     def __init__(self, model_config, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
@@ -22,10 +21,8 @@ class MobileStereoBase(nn.Module):
 
         self.cost = cost_volume_factory(model_config["cost_volume"])
         self.aggregate = cost_aggregate_factory(model_config["cost_aggregate"])
-        self.regress = \
-            disparity_regress_factory(model_config["disparity_regress"])
-        self.refine = \
-            disparity_refine_factory(model_config["disparity_refine"])
+        self.regress = disparity_regress_factory(model_config["disparity_regress"])
+        self.refine = disparity_refine_factory(model_config["disparity_refine"])
 
     def align(self, img, down_factor):
         n, c, src_h, src_w = img.shape
@@ -41,21 +38,21 @@ class MobileStereoBase(nn.Module):
         dst_h, dst_w = dst_size
 
         scale = float(dst_w) / src_w
-        disp = F.interpolate(disp * scale,
-                             dst_size,
-                             mode="bilinear",
-                             align_corners=True)
+        disp = F.interpolate(
+            disp * scale, dst_size, mode="bilinear", align_corners=True
+        )
         return disp
 
-    def forward(self, l_img, r_img):
+    def forward(self, l_img, r_img, is_train=True):
         _, _, h, w = l_img.shape
 
         l_img = (2.0 * (l_img / 255.0) - 1.0).contiguous()
         r_img = (2.0 * (r_img / 255.0) - 1.0).contiguous()
 
         h_pad, w_pad = self.align(l_img, self.down_factor)
-        l_img = F.pad(l_img, (0, w_pad, 0, h_pad))
-        r_img = F.pad(r_img, (0, w_pad, 0, h_pad))
+        if h_pad != 0 or w_pad != 0:
+            l_img = F.pad(l_img, (0, w_pad, 0, h_pad))
+            r_img = F.pad(r_img, (0, w_pad, 0, h_pad))
 
         l_fmaps = self.extract(l_img)
         r_fmaps = self.extract(r_img)
@@ -64,7 +61,9 @@ class MobileStereoBase(nn.Module):
         cost_volume = self.aggregate(cost_volume)
 
         l_disp = self.regress(cost_volume, self.cost.max_disp)
-        l_disp_pyramid = self.refine(l_disp, l_fmaps[1:], r_fmaps[1:])
+        l_disp_pyramid = self.refine(
+            l_disp, l_fmaps[1:], r_fmaps[1:], is_train=is_train
+        )
         l_disp_pyramid = [
             self.upsample(l_disp, l_img.shape[2:])[:, :, :h, :w]
             for l_disp in l_disp_pyramid

@@ -13,7 +13,6 @@ def disparity_refine_factory(config):
 
 
 class BaseRefineNet(nn.Module):
-
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
@@ -22,7 +21,6 @@ class BaseRefineNet(nn.Module):
 
 
 class DilateRefineBlock(nn.Module):
-
     def __init__(
         self,
         in_dim,
@@ -39,18 +37,23 @@ class DilateRefineBlock(nn.Module):
         self.out_dim = out_dim
         self.refine_dilates = refine_dilates
         self.conv0 = nn.Sequential(
-            get_conv2d_3x3(in_dim=self.in_dim,
-                           out_dim=self.hidden_dim,
-                           stride=1,
-                           dilation=1,
-                           norm_type="batch",
-                           use_relu=True),
+            get_conv2d_3x3(
+                in_dim=self.in_dim,
+                out_dim=self.hidden_dim,
+                stride=1,
+                dilation=1,
+                norm_type="batch",
+                use_relu=True,
+            ),
             *[
-                ResidualBlock(in_dim=self.hidden_dim,
-                              out_dim=self.hidden_dim,
-                              norm_type="batch",
-                              stride=1,
-                              dilation=dilation) for dilation in refine_dilates
+                ResidualBlock(
+                    in_dim=self.hidden_dim,
+                    out_dim=self.hidden_dim,
+                    norm_type="batch",
+                    stride=1,
+                    dilation=dilation,
+                )
+                for dilation in refine_dilates
             ],
             nn.Conv2d(self.hidden_dim, self.out_dim, 3, 1, 1),
         )
@@ -80,15 +83,17 @@ class DilateRefineBlock(nn.Module):
                 )
             r_fmap = self.warp_head(r_fmap, l_disp)
 
-        l_edge = torch.cat((l_disp, l_fmap, r_fmap), dim=1) \
-            if self.use_warp_feature else torch.cat((l_disp, l_fmap), dim=1)
+        l_edge = (
+            torch.cat((l_disp, l_fmap, r_fmap), dim=1)
+            if self.use_warp_feature
+            else torch.cat((l_disp, l_fmap), dim=1)
+        )
 
         l_edge = self.conv0(l_edge)
         return F.relu(l_disp + l_edge)
 
 
 class DilateRefineNet(BaseRefineNet):
-
     def __init__(
         self,
         in_dims,
@@ -109,22 +114,33 @@ class DilateRefineNet(BaseRefineNet):
         self.refine_layers = nn.ModuleList([])
         for in_dim, hidden_dim in zip(in_dims, hidden_dims):
             self.refine_layers.append(
-                DilateRefineBlock(\
+                DilateRefineBlock(
                     in_dim=1 + (2 if use_warp_feature else 1) * in_dim,
                     hidden_dim=hidden_dim,
                     out_dim=1,
                     refine_dilates=refine_dilates,
-                    use_warp_feature=use_warp_feature))
+                    use_warp_feature=use_warp_feature,
+                )
+            )
 
-    def forward(self, l_disp, l_fmaps=None, r_fmaps=None):
+    def forward(self, l_disp, l_fmaps=None, r_fmaps=None, is_train=True):
         assert len(l_fmaps) == len(r_fmaps) == len(self.refine_layers)
 
         l_disp_pyramid = []
-        for l_fmap, r_fmap, refine_layer \
-            in zip(l_fmaps, r_fmaps, self.refine_layers):
-            l_disp = \
-                F.interpolate(l_disp, scale_factor=2, mode="bilinear", align_corners=True) * 2.0
+        for i, (l_fmap, r_fmap, refine_layer) in enumerate(
+            zip(l_fmaps, r_fmaps, self.refine_layers)
+        ):
+            l_disp = (
+                F.interpolate(
+                    l_disp, scale_factor=2, mode="bilinear", align_corners=True
+                )
+                * 2.0
+            )
 
             l_disp = refine_layer(l_disp, l_fmap, r_fmap)
+
+            if (not is_train) and i != len(self.refine_layers) - 1:
+                continue
+
             l_disp_pyramid.append(l_disp)
         return l_disp_pyramid

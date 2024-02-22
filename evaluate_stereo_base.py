@@ -52,7 +52,7 @@ def validate_realsense(model, mixed_prec=False):
 
         with autocast(enabled=mixed_prec):
             start = time.time()
-            flow_pr = model(image1, image2)[-1]
+            flow_pr = model(image1, image2, is_train=False)[-1]
             end = time.time()
         flow_pr = padder.unpad(flow_pr.float()).cpu().squeeze(0)
         assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
@@ -124,7 +124,7 @@ def validate_eth3d(model, mixed_prec=False):
 
         with autocast(enabled=mixed_prec):
             start = time.time()
-            flow_pr = model(image1, image2)[-1]
+            flow_pr = model(image1, image2, is_train=False)[-1]
             end = time.time()
         flow_pr = padder.unpad(flow_pr.float()).cpu().squeeze(0)
         assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
@@ -200,7 +200,7 @@ def validate_kitti(model, mixed_prec=False):
 
         with autocast(enabled=mixed_prec):
             start = time.time()
-            flow_pr = model(image1, image2)[-1]
+            flow_pr = model(image1, image2, is_train=False)[-1]
             end = time.time()
 
         flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
@@ -258,7 +258,7 @@ def validate_things(model, mixed_prec=False):
 
         with autocast(enabled=mixed_prec):
             start = time.time()
-            flow_pr = model(image1, image2)[-1]
+            flow_pr = model(image1, image2, is_train=False)[-1]
             end = time.time()
         flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
         assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
@@ -319,7 +319,7 @@ def validate_middlebury(model, split="F", mixed_prec=False):
 
         with autocast(enabled=mixed_prec):
             start = time.time()
-            flow_pr = model(image1, image2)[-1]
+            flow_pr = model(image1, image2, is_train=False)[-1]
             end = time.time()
         flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
 
