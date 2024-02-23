@@ -19,8 +19,8 @@ def get_model_capacity(module, inputs=None, verbose=True):
     # n_params = parameter_count_table(module)
 
     if verbose:
-        print(f"module={module}.")
-        print("{:<30}  {:<8}G".format("#operations:", np.round(n_macs / 1e9), 5))
-        print("{:<30}  {:<8}G".format("#flops: ", np.round(n_flops / 1e9, 5)))
-        print("{:<30}  {:<8}M".format("#parameters: ", np.round(n_params / 1e6, 5)))
+        # print(f"module={module}.")
+        print("{:<30}  {:<8}G".format("#GMACS: ", np.round(n_macs / 1e9), 5))
+        print("{:<30}  {:<8}G".format("#GFLOPS: ", np.round(n_flops / 1e9, 5)))
+        print("{:<30}  {:<8}M".format("#PARAMS: ", np.round(n_params / 1e6, 5)))
     return n_macs, n_flops, n_params
