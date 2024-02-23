@@ -136,7 +136,7 @@ class MobileResidualFeatureExtract(BaseFeatureExtract):
 
         for i in range(self.down_factor + 1):
             layer = self.make_layer(
-                num_layers=self.num_layers[i - 1],
+                num_layers=self.num_layers[i],
                 in_dim=(3 if i == 0 else self.hidden_dims[i - 1]),
                 out_dim=self.hidden_dims[i],
                 stride=(1 if i == 0 else 2),
@@ -178,7 +178,8 @@ class MobileResidualFeatureExtract(BaseFeatureExtract):
     def forward(self, x):
         n = len(self.down_layers)
 
-        down_pyramid = [None for _ in range(n)]
+        down_pyramid = []
         for i, down_layer in enumerate(self.down_layers):
-            down_pyramid[n - 1 - i] = down_layer(x)
-        return down_pyramid
+            x = down_layer(x)
+            down_pyramid.append(x)
+        return [down_pyramid[n - 1 - i] for i in range(n)]
