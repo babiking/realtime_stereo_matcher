@@ -5,7 +5,6 @@ import torch.nn.functional as F
 
 
 class SameConv2d(nn.Conv2d):
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -29,7 +28,6 @@ class SameConv2d(nn.Conv2d):
 
 
 class UpMergeConvT2d(nn.Module):
-
     def __init__(self, in_dim, out_dim, cat_dim=0):
         super().__init__()
         self.in_dim = in_dim
@@ -58,7 +56,6 @@ class UpMergeConvT2d(nn.Module):
 
 
 class WarpHead(nn.Module):
-
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
@@ -83,13 +80,11 @@ class WarpHead(nn.Module):
             indexing="ij",
         )
 
-        grid_x = \
-            grid_x.view([1, 1, h, w]) - flow[:, 0, :, :].view([n, 1, h, w])
+        grid_x = grid_x.view([1, 1, h, w]) - flow[:, 0, :, :].view([n, 1, h, w])
         grid_x = grid_x.permute([0, 2, 3, 1])
 
         if c == 2:
-            grid_y = \
-                grid_y.view([1, 1, h, w]) - flow[:, 1, :, :].view([n, 1, h, w])
+            grid_y = grid_y.view([1, 1, h, w]) - flow[:, 1, :, :].view([n, 1, h, w])
             grid_y = grid_y.permute([0, 2, 3, 1])
         else:
             grid_y = grid_y.view([1, h, w, 1]).repeat(n, 1, 1, 1)
@@ -98,18 +93,17 @@ class WarpHead(nn.Module):
         grid_y = 2.0 * grid_y / (h - 1.0) - 1.0
         grid_map = torch.concatenate((grid_x, grid_y), dim=-1)
 
-        warped = F.grid_sample(img,
-                               grid_map,
-                               mode="bilinear",
-                               padding_mode="zeros",
-                               align_corners=True)
+        warped = F.grid_sample(
+            img, grid_map, mode="bilinear", padding_mode="zeros", align_corners=False
+        )
         return warped
 
 
 def get_norm2d(out_dim, norm_type, channels_per_group=8):
     if norm_type == "group":
-        return nn.GroupNorm(num_groups=(out_dim // channels_per_group),
-                            num_channels=out_dim)
+        return nn.GroupNorm(
+            num_groups=(out_dim // channels_per_group), num_channels=out_dim
+        )
     elif norm_type == "batch":
         return nn.BatchNorm2d(out_dim)
     elif norm_type == "instance":
@@ -120,51 +114,43 @@ def get_norm2d(out_dim, norm_type, channels_per_group=8):
         raise NotImplementedError(f"invalid norm type: {norm_type}!")
 
 
-def get_conv2d_3x3(in_dim,
-                   out_dim,
-                   stride,
-                   dilation,
-                   norm_type,
-                   channels_per_group=8,
-                   use_relu=True):
-    conv = nn.Conv2d(in_dim,
-                     out_dim,
-                     kernel_size=3,
-                     stride=stride,
-                     padding=dilation,
-                     dilation=dilation)
+def get_conv2d_3x3(
+    in_dim, out_dim, stride, dilation, norm_type, channels_per_group=8, use_relu=True
+):
+    conv = nn.Conv2d(
+        in_dim,
+        out_dim,
+        kernel_size=3,
+        stride=stride,
+        padding=dilation,
+        dilation=dilation,
+    )
     norm = get_norm2d(out_dim, norm_type, channels_per_group)
     relu = nn.ReLU() if use_relu else nn.Sequential()
     return nn.Sequential(conv, norm, relu)
 
 
-def get_conv2d_1x1(in_dim,
-                   out_dim,
-                   stride,
-                   dilation,
-                   norm_type,
-                   channels_per_group=8,
-                   use_relu=True):
-    conv = nn.Conv2d(in_dim,
-                     out_dim,
-                     kernel_size=1,
-                     stride=stride,
-                     padding=0,
-                     dilation=dilation)
+def get_conv2d_1x1(
+    in_dim, out_dim, stride, dilation, norm_type, channels_per_group=8, use_relu=True
+):
+    conv = nn.Conv2d(
+        in_dim, out_dim, kernel_size=1, stride=stride, padding=0, dilation=dilation
+    )
     norm = get_norm2d(out_dim, norm_type, channels_per_group)
     relu = nn.ReLU() if use_relu else nn.Sequential()
     return nn.Sequential(conv, norm, relu)
 
 
 class ResidualBlock(nn.Module):
-
-    def __init__(self,
-                 in_dim,
-                 out_dim,
-                 norm_type="group",
-                 stride=1,
-                 dilation=1,
-                 channels_per_group=8):
+    def __init__(
+        self,
+        in_dim,
+        out_dim,
+        norm_type="group",
+        stride=1,
+        dilation=1,
+        channels_per_group=8,
+    ):
         super(ResidualBlock, self).__init__()
 
         self.in_dim = in_dim
@@ -174,20 +160,24 @@ class ResidualBlock(nn.Module):
         self.dilation = dilation
         self.channels_per_group = channels_per_group
 
-        self.conv1 = get_conv2d_3x3(in_dim=in_dim,
-                                    out_dim=out_dim,
-                                    stride=stride,
-                                    dilation=dilation,
-                                    norm_type=norm_type,
-                                    channels_per_group=channels_per_group,
-                                    use_relu=True)
-        self.conv2 = get_conv2d_3x3(in_dim=out_dim,
-                                    out_dim=out_dim,
-                                    stride=1,
-                                    dilation=dilation,
-                                    norm_type=norm_type,
-                                    channels_per_group=channels_per_group,
-                                    use_relu=True)
+        self.conv1 = get_conv2d_3x3(
+            in_dim=in_dim,
+            out_dim=out_dim,
+            stride=stride,
+            dilation=dilation,
+            norm_type=norm_type,
+            channels_per_group=channels_per_group,
+            use_relu=True,
+        )
+        self.conv2 = get_conv2d_3x3(
+            in_dim=out_dim,
+            out_dim=out_dim,
+            stride=1,
+            dilation=dilation,
+            norm_type=norm_type,
+            channels_per_group=channels_per_group,
+            use_relu=True,
+        )
 
         if stride == 1 and in_dim == out_dim:
             self.downsample = None
@@ -199,7 +189,8 @@ class ResidualBlock(nn.Module):
                 dilation=dilation,
                 norm_type=norm_type,
                 channels_per_group=channels_per_group,
-                use_relu=False)
+                use_relu=False,
+            )
 
         self.relu = nn.ReLU()
 
@@ -212,3 +203,93 @@ class ResidualBlock(nn.Module):
             x = self.downsample(x)
 
         return self.relu(x + y)
+
+
+class MobileResidualBlockV2(nn.Module):
+    def __init__(self, in_dim, out_dim, stride, expanse_ratio=1, dilation=1):
+        super(MobileResidualBlockV2, self).__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.stride = stride
+        assert stride in [1, 2]
+        self.expanse_ratio = expanse_ratio
+        self.dilation = dilation
+
+        self.hidden_dim = int(in_dim * expanse_ratio)
+        self.use_res_connect = (self.stride == 1) and (in_dim == out_dim)
+
+        # nn.Conv2D output dimension:
+        #   H_out = floor( (H_in + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1)
+        # Conv2D:
+        #   K x K x C_in x C_out
+        # Depthwise Separable Conv2D:
+        #   K x K x C_in + 1 x 1 x C_in x C_out
+        if self.expanse_ratio == 1:
+            self.conv = nn.Sequential(
+                # depthwise
+                nn.Conv2d(
+                    in_channels=self.in_dim,
+                    out_channels=self.hidden_dim,
+                    kernel_size=3,
+                    stride=stride,
+                    padding=self.dilation,
+                    dilation=self.dilation,
+                    groups=self.hidden_dim,
+                    bias=False,
+                ),
+                nn.BatchNorm2d(self.hidden_dim),
+                nn.ReLU6(inplace=True),
+                # pointwisze-linear
+                nn.Conv2d(
+                    in_channels=self.hidden_dim,
+                    out_channels=self.out_dim,
+                    kernel_size=1,
+                    stride=1,
+                    padding=0,
+                    bias=False,
+                ),
+                nn.BatchNorm2d(self.out_dim),
+            )
+        else:
+            self.conv = nn.Sequential(
+                # pointwise
+                nn.Conv2d(
+                    in_channels=self.in_dim,
+                    out_channels=self.hidden_dim,
+                    kernel_size=1,
+                    stride=1,
+                    padding=0,
+                    bias=False,
+                ),
+                nn.BatchNorm2d(self.hidden_dim),
+                nn.ReLU6(inplace=True),
+                # depthwise
+                nn.Conv2d(
+                    in_channels=self.hidden_dim,
+                    out_channels=self.hidden_dim,
+                    kernel_size=3,
+                    stride=stride,
+                    padding=self.dilation,
+                    dilation=self.dilation,
+                    groups=self.hidden_dim,
+                    bias=False,
+                ),
+                nn.BatchNorm2d(self.hidden_dim),
+                nn.ReLU6(inplace=True),
+                # pointwise-linear
+                nn.Conv2d(
+                    in_channels=self.hidden_dim,
+                    out_channels=self.out_dim,
+                    kernel_size=1,
+                    stride=1,
+                    padding=0,
+                    bias=False,
+                ),
+                nn.BatchNorm2d(self.out_dim),
+            )
+
+    def forward(self, x):
+        if self.use_res_connect:
+            return x + self.conv(x)
+        else:
+            return self.conv(x)
