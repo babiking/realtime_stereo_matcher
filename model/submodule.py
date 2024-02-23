@@ -216,7 +216,16 @@ class MobileResidualBlockV2(nn.Module):
         self.dilation = dilation
 
         self.hidden_dim = int(in_dim * expanse_ratio)
-        self.use_res_connect = (self.stride == 1) and (in_dim == out_dim)
+
+        if self.stride != 1 or self.in_dim != self.out_dim:
+            self.downsample = nn.Sequential(
+                nn.Conv2d(
+                    self.in_dim, self.out_dim, kernel_size=1, stride=stride, bias=False
+                ),
+                nn.BatchNorm2d(self.out_dim),
+            )
+        else:
+            self.downsample = None
 
         # nn.Conv2D output dimension:
         #   H_out = floor( (H_in + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1)
@@ -289,7 +298,4 @@ class MobileResidualBlockV2(nn.Module):
             )
 
     def forward(self, x):
-        if self.use_res_connect:
-            return x + self.conv(x)
-        else:
-            return self.conv(x)
+        return self.conv(x) + (x if self.downsample is None else self.downsample(x))
