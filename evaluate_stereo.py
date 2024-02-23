@@ -5,12 +5,14 @@ import time
 import json
 import logging
 import numpy as np
+import copy
 import torch
 from tqdm import tqdm
 from model import build_model
 import dataset.stereo_datasets as datasets
 from dataset.input_padder import InputPadder
 from loss.loss import AdaptiveLoss
+from tools.profiler import get_model_capacity
 import gflags
 
 gflags.DEFINE_string(
@@ -414,9 +416,15 @@ def main():
 
     exp_config = json.load(open(FLAGS.exp_config_json, "r"))
 
-    model = torch.nn.DataParallel(build_model(exp_config["model"])).to(
-        torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = torch.nn.DataParallel(build_model(exp_config["model"])).to(device)
+
+    sample = torch.rand(size=(1, 3, 480, 640), dtype=torch.float32).to(device)
+    _ = get_model_capacity(
+        module=copy.deepcopy(model.module), inputs=(sample, sample), verbose=True
     )
+    del sample
+    torch.cuda.empty_cache()
 
     model.cuda()
     model.eval()
@@ -427,9 +435,9 @@ def main():
         model.load_state_dict(checkpoint, strict=True)
         logging.info(f"Done loading checkpoint.")
 
-        print(
-            f"The model has {format(count_parameters(model)/1e6, '.4f')}M learnable parameters."
-        )
+        # print(
+        #     f"The model has {format(count_parameters(model)/1e6, '.4f')}M learnable parameters."
+        # )
 
     # The CUDA implementations of the correlation volume prevent half-precision
     # rounding errors in the correlation lookup. This allows us to use mixed precision

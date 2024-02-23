@@ -3,6 +3,7 @@ import os
 import sys
 import time
 import json
+import copy
 import logging
 import numpy as np
 import torch
@@ -11,6 +12,7 @@ import dataset.stereo_datasets as datasets
 from dataset.input_padder import InputPadder
 from model.mobile_stereo_base import MobileStereoBase
 from loss.loss import AdaptiveLoss
+from tools.profiler import get_model_capacity
 import gflags
 
 gflags.DEFINE_string(
@@ -20,7 +22,7 @@ gflags.DEFINE_string(
 )
 gflags.DEFINE_string(
     "model_chkpt_file",
-    "experiments/TRAINER_BASE_V1/checkpoints/TRAINER_BASE_V1-epoch-200000.pth.gz",
+    "experiments/TRAINER_BASE_V1/checkpoints/TRAINER_BASE_V1-epoch-90000.pth.gz",
     "model checkpont file",
 )
 gflags.DEFINE_list(
@@ -417,9 +419,14 @@ def main():
 
     base_config = json.load(open(FLAGS.base_config_json, "r"))
 
-    model = torch.nn.DataParallel(MobileStereoBase(base_config)).to(
-        torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    )
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model = torch.nn.DataParallel(MobileStereoBase(base_config)).to(device)
+
+    sample = torch.rand(size=(1, 3, 480, 640), dtype=torch.float32).to(device)
+    _ = get_model_capacity(module=copy.deepcopy(model.module), inputs=(sample, sample, False), verbose=True)
+    del sample
+    torch.cuda.empty_cache()
 
     model.cuda()
     model.eval()
@@ -429,9 +436,9 @@ def main():
     model.load_state_dict(checkpoint, strict=True)
     logging.info(f"Done loading checkpoint.")
 
-    print(
-        f"The model has {format(count_parameters(model)/1e6, '.4f')}M learnable parameters."
-    )
+    # print(
+    #     f"The model has {format(count_parameters(model)/1e6, '.4f')}M learnable parameters."
+    # )
 
     # The CUDA implementations of the correlation volume prevent half-precision
     # rounding errors in the correlation lookup. This allows us to use mixed precision
