@@ -1,11 +1,13 @@
 import os
 import glob
+import copy
 import time
 import onnxruntime
 import torch
 import torch.nn as nn
 import numpy as np
 from tqdm import tqdm
+from tools.profiler import get_model_capacity
 
 
 class TestHelper(object):
@@ -72,7 +74,6 @@ class TestHelper(object):
                 for input_file in input_files:
                     fp.write(os.path.relpath(input_file, self.dump_path) + "\n")
 
-
     def execute(self, n=20, *args, **kwargs):
         data_path = os.path.join(self.dump_path, "data")
         os.makedirs(data_path, exist_ok=True)
@@ -81,6 +82,9 @@ class TestHelper(object):
         for i in tqdm(range(n), desc=f"random test MODEL={self.model_name}..."):
             inputs = self.model.get_random_inputs()
             inputs = [x.to(self.device) for x in inputs]
+
+            if i == 0:
+                _ = get_model_capacity(self.model, tuple(inputs), verbose=True)
 
             for j, data in enumerate(inputs):
                 self.write_input_data(
@@ -109,6 +113,8 @@ class TestHelper(object):
                     data,
                     os.path.join(data_path, f"{i:04d}_output{k}.txt"),
                 )
-        print(f"Device={self.device}, OP={self.model.__class__.__name__}, Median FPS = {(1.0 / np.median(fps)):.4f} for {n} inferences.")
+        print(
+            f"Device={self.device}, OP={self.model.__class__.__name__}, Median FPS = {(1.0 / np.median(fps)):.4f} for {n} inferences."
+        )
 
         self.glob_input_files()
