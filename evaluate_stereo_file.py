@@ -10,12 +10,10 @@ import dataset.stereo_datasets as datasets
 from dataset.frame_utils import readPFM
 import gflags
 
-gflags.DEFINE_list("test_datasets", ["realsense"], "test datasets for evaluation")
-gflags.DEFINE_list(
-    "test_predicts",
-    [
-        "/mnt/data/workspace/datasets/MyRealsense/20240220_desktop_0000/predict/TRAINER_BASE_V1-epoch-200000.pth/"
-    ],
+gflags.DEFINE_list("datasets", ["realsense"], "test datasets for evaluation")
+gflags.DEFINE_string(
+    "algorithm",
+    "TRAINER_BASE_V1-epoch-200000.pth",
     "test predicts path for evaluation",
 )
 
@@ -27,21 +25,27 @@ def count_parameters(model):
 
 
 @torch.no_grad()
-def validate_realsense(predict_path):
+def validate_realsense(algorithm):
     """Peform validation using the Realsense (train) split"""
     aug_params = {}
     val_dataset = datasets.RealsenseDataset(aug_params)
 
-    out_list, epe_list, fps_list = [], [], []
+    out_list, epe_list, fps_list, fill_list = [], [], [], []
     for val_id in range(len(val_dataset)):
         image_files, image1, image2, flow_gt, valid_gt = val_dataset[val_id]
+
+        image_path = os.path.dirname(image_files[0])
 
         image_name = os.path.splitext(os.path.basename(image_files[0]))[0]
         image_name = image_name.replace("_left_Img", "")
 
         w, h = imagesize.get(image_files[0])
 
-        flow_pr_file = os.path.join(predict_path, f"{image_name}_{w}x{h}_disparity.pfm")
+        flow_pr_file = os.path.join(
+            image_path, "../predict", algorithm, f"{image_name}_{w}x{h}_disparity.pfm"
+        )
+        if not os.path.exists(flow_pr_file):
+            continue
 
         start = time.time()
         flow_pr = torch.tensor(
@@ -70,25 +74,29 @@ def validate_realsense(predict_path):
         ]
         image_epe = epe_flattened[val].mean().item()
         image_fps = 1.0 / (end - start)
+        image_fill = val.float().mean().item()
         logging.info(
-            f"Realsense {val_id+1} out of {len(val_dataset)}. EPE: {image_epe:.4f}, D1: {image_out[1]:.4f}, FPS: {image_fps:.4f}."
+            f"Realsense {val_id+1} out of {len(val_dataset)}. EPE: {image_epe:.4f}, D1: {image_out[1]:.4f}, FPS: {image_fps:.4f}, Fill: {image_fill:.4f}."
         )
 
         epe_list.append(image_epe)
         out_list.append(image_out)
         fps_list.append(image_fps)
+        fill_list.append(image_fill)
 
     epe_list = np.array(epe_list)
     out_list = np.array(out_list)
     fps_list = np.array(fps_list)
+    fill_list = np.array(fill_list)
 
     epe = np.mean(epe_list)
     bads = 100 * np.mean(out_list, axis=0)
     fps = np.mean(fps_list)
+    fill = np.mean(fill_list)
 
     print(
-        "Validation Realsense: EPE=%.4f, bad0.5=%.4f, bad1.0=%.4f, bad3.0=%.4f, bad5.0=%.4f, FPS=%.4f"
-        % (epe, bads[0], bads[1], bads[2], bads[3], fps)
+        "Validation Realsense: EPE=%.4f, bad0.5=%.4f, bad1.0=%.4f, bad3.0=%.4f, bad5.0=%.4f, FPS=%.4f, Fill=%.4f"
+        % (epe, bads[0], bads[1], bads[2], bads[3], fps, fill)
     )
     return {
         "realsense-epe": epe,
@@ -97,6 +105,7 @@ def validate_realsense(predict_path):
         "realsense-bad3.0": bads[2],
         "realsense-bad5.0": bads[3],
         "realsense-fps": fps,
+        "realsense-fill": fill,
     }
 
 
@@ -109,9 +118,9 @@ def main():
         format="%(asctime)s %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
     )
 
-    for dataset, predict_path in zip(FLAGS.test_datasets, FLAGS.test_predicts):
+    for dataset in FLAGS.datasets:
         if dataset == "realsense":
-            validate_realsense(predict_path)
+            validate_realsense(FLAGS.algorithm)
 
         else:
             raise NotImplementedError
