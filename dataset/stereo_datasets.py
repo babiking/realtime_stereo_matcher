@@ -149,7 +149,10 @@ class RealsenseDataset(StereoDataset):
             for l_img_file in l_img_files:
                 w, h = imagesize.get(l_img_file)
 
-                scene_name, uuid_tag = os.path.basename(l_img_file).split("_")[:2]
+                img_name_splits = os.path.basename(l_img_file).split("_")
+
+                scene_name = "_".join(img_name_splits[:-4])
+                uuid_tag = img_name_splits[-4]
 
                 r_img_file = os.path.join(
                     sub_path, "image", f"{scene_name}_{uuid_tag}_off_right_Img.png"
