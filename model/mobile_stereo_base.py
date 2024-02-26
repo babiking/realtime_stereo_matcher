@@ -37,10 +37,11 @@ class MobileStereoBase(nn.Module):
         src_h, src_w = disp.shape[2:]
         dst_h, dst_w = dst_size
 
-        scale = float(dst_w) / src_w
-        disp = F.interpolate(
-            disp * scale, dst_size, mode="bilinear", align_corners=True
-        )
+        if src_h != dst_h or src_w != dst_w:
+            scale = float(dst_w) / src_w
+            disp = F.interpolate(
+                disp * scale, dst_size, mode="bilinear", align_corners=False
+            )
         return disp
 
     def forward(self, l_img, r_img, is_train=True):
