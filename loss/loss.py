@@ -23,7 +23,7 @@ def get_flow_map_metrics(flow_gt, flow_pred, flow_valid):
     return flow_metrics
 
 
-class BaseLossFactory(nn.Module):
+class LossFactory(nn.Module):
     def __init__(self, loss_configs, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
@@ -35,24 +35,78 @@ class BaseLossFactory(nn.Module):
             loss_type = loss_config["type"]
             if loss_type == "SequenceLoss":
                 self.loss_funcs.append(SequenceLoss(**loss_config["parameters"]))
-            elif loss_type == "AdaptiveLoss":
-                self.loss_funcs.append(AdaptiveLoss(**loss_config["parameters"]))
+            elif loss_type == "LRConsistentLoss":
+                self.loss_funcs.append(LRConsistentLoss(**loss_config["parameters"]))
             else:
                 raise NotImplementedError(f"invalid loss type: {loss_type}!")
 
             self.loss_weights.append(loss_config.get("weight", 1.0))
 
-    def forward(self, l_disp_gt, l_valid_gt, l_disp_preds, l_fmaps, r_fmaps):
+    def forward(self, l_flow_gt, l_valid_gt, l_flow_preds, l_fmaps, r_fmaps):
         loss = 0.0
 
         for loss_weight, loss_func in zip(self.loss_weights, self.loss_funcs):
             loss += loss_weight * loss_func(
-                l_disp_gt, l_valid_gt, l_disp_preds, l_fmaps, r_fmaps
+                l_flow_gt, l_valid_gt, l_flow_preds, l_fmaps, r_fmaps
             )
         return loss
 
 
-class SequenceLoss(nn.Module):
+class BaseLoss(nn.Module):
+    def __init__(self, loss_gamma, max_flow_magnitude, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        self.loss_gamma = loss_gamma
+        self.max_flow_magnitude = max_flow_magnitude
+
+    def get_loss_item(self, i, n, l_flow_gt, l_flow_pred, l_fmap, r_fmap):
+        raise NotImplementedError
+
+    def forward(self, l_flow_gt, l_valid_gt, l_flow_preds, l_fmaps, r_fmaps):
+        """
+        calculate sequence loss between flow map groundtruth and predictions.
+
+        Args:
+            [1] l_flow_gt, left flow map groundtruth, N x 1 x H x W or N x 2 x H x W, torch.float32
+            [2] l_valid_gt, left valid mask groundtruth, N x 1 x H x W, torch.uint8, 1 -> valid | 0 -> invalid
+            [3] l_flow_preds, left flow map predictions, [N x 1 x H x W] or [N x 2 x H x W], list
+            [4] l_fmaps, left feature maps, [N x C x H' x W'], list
+            [5] r_fmaps, right feature maps, [N x C x H' x W'], list
+
+        Return:
+            [1] l_flow_loss: scalar flow map loss value.
+        """
+        n, c, h, w = l_flow_gt.shape
+
+        n_preds = len(l_flow_preds)
+        assert n_preds >= 1, f"empty flow predictions ({n_preds})!"
+
+        l_flow_mag = torch.sum(l_flow_gt**2, dim=1).sqrt().unsqueeze(1)
+
+        l_flow_valid = (l_valid_gt >= 0.5) & (l_flow_mag < self.max_flow_magnitude)
+        l_flow_valid = l_flow_valid.repeat([1, c, 1, 1])
+
+        assert l_flow_valid.shape == l_flow_gt.shape
+        assert not torch.isinf(l_flow_gt[l_flow_valid.bool()]).any()
+
+        l_flow_loss = 0.0
+        for i in range(n_preds):
+            l_flow_weight = self.loss_gamma ** (n_preds - 1 - i)
+            l_flow_pred = l_flow_preds[i]
+
+            assert not torch.isnan(l_flow_pred).any()
+            assert not torch.isinf(l_flow_pred).any()
+
+            l_flow_loss += (
+                l_flow_weight
+                * self.get_loss_item(
+                    i, n_preds, l_flow_gt, l_flow_pred, l_fmaps[i], r_fmaps[i]
+                )[l_flow_valid.bool()].mean()
+            )
+        return l_flow_loss
+
+
+class SequenceLoss(BaseLoss):
     def __init__(self, loss_gamma=0.9, max_flow_magnitude=700, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
@@ -62,53 +116,73 @@ class SequenceLoss(nn.Module):
         self.l1_loss_func = nn.L1Loss(reduction="none")
         self.smooth_l1_loss_func = nn.SmoothL1Loss(reduction="none", beta=1.0)
 
-    def forward(self, flow_preds, flow_gt, flow_valid):
+    def get_loss_item(self, i, n, l_flow_gt, l_flow_pred, l_fmap=None, r_fmap=None):
+        if l_flow_pred.shape != l_flow_gt.shape:
+            scale = float(l_flow_gt.shape[-1]) / l_flow_pred.shape[-1]
+            l_flow_pred = F.interpolate(
+                l_flow_pred * scale,
+                size=(l_flow_gt.shape[2:]),
+                mode="bilinear",
+                align_corners=False,
+            )
+
+        if i == n - 1:
+            return self.smooth_l1_loss_func(l_flow_gt, l_flow_pred)
+        else:
+            return self.l1_loss_func(l_flow_gt, l_flow_pred)
+
+
+class LRConsistentLoss(BaseLoss):
+    def __init__(self, loss_gamma=0.9, max_flow_magnitude=700, *args, **kwargs) -> None:
+        super().__init__(loss_gamma, max_flow_magnitude, *args, **kwargs)
+
+        self.loss_func = nn.L1Loss(reduction="none")
+
+    def warp_by_flow_map(self, img, flow):
         """
-        calculate sequence loss between flow map groundtruth and predictions.
+        warp image according to stereo flow map (i.e. disparity map)
 
         Args:
-            [1] flow_preds: flow map predictions from low to high resolution or from initial to final iterations.
-            [2] flow_gt:    flow map groundtruth.
-            [3] flow_valid: flow map valid mask.
-            [4] loss_gamma
-            [5] max_flow_magnitude
+            [1] img, N x C x H x W, original image or feature map
+            [2] flow,  N x 1 x H x W or N x 2 x H x W, flow map
 
         Return:
-            [1] flow_loss: scalar flow map loss value.
+            [1] warped, N x C x H x W, warped image or feature map
         """
+        n, c, h, w = flow.shape
 
-        n_preds = len(flow_preds)
+        assert c == 1 or c == 2, f"invalid flow map dimension 1 or 2 ({c})!"
 
-        assert n_preds >= 1, f"empty flow predictions ({n_preds})!"
+        grid_y, grid_x = torch.meshgrid(
+            torch.arange(h, device=img.device, dtype=img.dtype),
+            torch.arange(w, device=img.device, dtype=img.dtype),
+            indexing="ij",
+        )
 
-        flow_mag = torch.sum(flow_gt**2, dim=1).sqrt()
+        grid_x = grid_x.view([1, 1, h, w]) - flow[:, 0, :, :].view([n, 1, h, w])
+        grid_x = grid_x.permute([0, 2, 3, 1])
 
-        flow_valid = (flow_valid >= 0.5) & (flow_mag < self.max_flow_magnitude)
-        flow_valid = flow_valid.unsqueeze(1)
+        if c == 2:
+            grid_y = grid_y.view([1, 1, h, w]) - flow[:, 1, :, :].view([n, 1, h, w])
+            grid_y = grid_y.permute([0, 2, 3, 1])
+        else:
+            grid_y = grid_y.view([1, h, w, 1]).repeat(n, 1, 1, 1)
 
-        assert flow_valid.shape == flow_gt.shape, [flow_valid.shape, flow_gt.shape]
-        assert not torch.isinf(flow_gt[flow_valid.bool()]).any()
+        grid_x = 2.0 * grid_x / (w - 1.0) - 1.0
+        grid_y = 2.0 * grid_y / (h - 1.0) - 1.0
+        grid_map = torch.concatenate((grid_x, grid_y), dim=-1)
 
-        flow_loss = 0.0
-        for i in range(n_preds):
-            i_weight = self.loss_gamma ** (n_preds - 1 - i)
-            i_flow_pred = flow_preds[i]
+        warped = F.grid_sample(
+            img, grid_map, mode="bilinear", padding_mode="zeros", align_corners=True
+        )
+        return warped
 
-            assert not torch.isnan(i_flow_pred).any()
-            assert not torch.isinf(i_flow_pred).any()
+    def get_loss_item(self, i, n, l_flow_gt, l_flow_pred, l_fmap, r_fmap):
+        assert l_flow_pred.shape[:2] == l_fmap.shape[:2]
 
-            if i_flow_pred.shape != flow_gt.shape:
-                i_scale = float(flow_gt.shape[-1]) / i_flow_pred.shape[-1]
-                i_flow_pred = F.interpolate(i_flow_pred * i_scale, (flow_gt.shape[2:]))
+        l_fmap_warp = self.warp_by_flow_map(r_fmap, l_flow_pred)
 
-            if i == n_preds - 1:
-                i_loss = self.smooth_l1_loss_func(flow_gt, i_flow_pred)
-            else:
-                i_loss = self.l1_loss_func(flow_gt, i_flow_pred)
-
-            assert i_loss.shape == flow_valid.shape
-            flow_loss += i_weight * i_loss[flow_valid.bool()].mean()
-        return flow_loss
+        return self.loss_func(l_fmap, l_fmap_warp).mean(1)
 
 
 class AdaptiveLoss(nn.Module):

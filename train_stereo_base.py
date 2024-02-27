@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from model.mobile_stereo_base import MobileStereoBase
-from loss import build_loss_function
+from loss.loss import LossFactory
 from loss.loss import get_flow_map_metrics
 import dataset.stereo_datasets as datasets
 from torch.cuda.amp import GradScaler
@@ -153,7 +153,7 @@ def train(exp_config, model_config):
     model = nn.DataParallel(MobileStereoBase(model_config))
     logging.info(f"Model parameter count (pytorch): {count_parameters(model)}.")
 
-    loss_func = build_loss_function(exp_config["train"]["loss"])
+    loss_func = LossFactory(loss_configs=exp_config["train"]["loss"])
 
     train_loader = datasets.fetch_dataloader(exp_config)
     optimizer, scheduler = fetch_optimizer(exp_config, model)
@@ -180,11 +180,20 @@ def train(exp_config, model_config):
             optimizer.zero_grad()
             image1, image2, flow, valid = [x.cuda() for x in data_blob]
 
+            flow = model.module.pad(flow.squeeze(1))
+            valid = model.module.pad(valid.squeeze(1))
+
             assert model.training
-            flow_predictions = model(image1, image2)
+            flow_predictions, l_fmaps, r_fmaps = model(image1, image2)
             assert model.training
 
-            loss = loss_func(flow_predictions, flow, valid)
+            loss = loss_func(
+                l_flow_gt=flow,
+                l_valid_gt=valid,
+                l_flow_preds=flow_predictions,
+                l_fmaps=l_fmaps,
+                r_fmaps=r_fmaps,
+            )
             metrics = get_flow_map_metrics(flow, flow_predictions[-1], valid)
             logger.writer.add_scalar("live_loss", loss.item(), global_batch_num)
             logger.writer.add_scalar(
