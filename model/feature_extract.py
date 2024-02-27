@@ -1,3 +1,4 @@
+import timm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,6 +11,8 @@ def feature_extract_factory(config):
         return UNetFeatureExtract(**config["arguments"])
     elif extract_type == "mobile_residual":
         return MobileResidualFeatureExtract(**config["arguments"])
+    elif extract_type == "mobile_net_v2_pretrain":
+        return MobileNetV2FeatureExtract(**config["arguments"])
     else:
         raise NotImplementedError(f"invalid feature extractor type: {extract_type}!")
 
@@ -183,3 +186,42 @@ class MobileResidualFeatureExtract(BaseFeatureExtract):
             x = down_layer(x)
             down_pyramid.append(x)
         return [down_pyramid[n - 1 - i] for i in range(n)]
+
+
+class MobileNetV2FeatureExtract(BaseFeatureExtract):
+    def __init__(
+        self, hidden_dims=[32, 16, 24, 32], use_pretrain=True, *args, **kwargs
+    ):
+        super().__init__(hidden_dims, use_pretrain, *args, **kwargs)
+
+        self.layers = [1, 2, 3, 5, 6]
+
+        model = timm.create_model(
+            "mobilenetv2_100", pretrained=self.use_pretrain, features_only=True
+        )
+
+        self.conv_stem = model.conv_stem
+        self.bn1 = model.bn1
+        self.act1 = nn.LeakyReLU(0.2)  # model.act1
+
+        self.block0 = torch.nn.Sequential(*model.blocks[0 : self.layers[0]])
+        self.block1 = torch.nn.Sequential(
+            *model.blocks[self.layers[0] : self.layers[1]]
+        )
+        self.block2 = torch.nn.Sequential(
+            *model.blocks[self.layers[1] : self.layers[2]]
+        )
+        # self.block3 = torch.nn.Sequential(*model.blocks[self.layers[2] : self.layers[3]])
+        # self.block4 = torch.nn.Sequential(*model.blocks[self.layers[3] : self.layers[4]])
+
+    def get_down_factor(self):
+        return len(self.hidden_dims) - 1
+
+    def forward(self, x):
+        x1 = self.act1(self.bn1(self.conv_stem(x)))
+        x2 = self.block0(x1)
+        x4 = self.block1(x2)
+        x8 = self.block2(x4)
+        # x16 = self.block3(x8)
+        # x32 = self.block4(x16)
+        return [x8, x4, x2, x1]

@@ -17,6 +17,7 @@ class MobileStereoBase(nn.Module):
         self.model_name = model_config["model_name"]
 
         self.extract = feature_extract_factory(model_config["feature_extract"])
+
         self.down_factor = self.extract.get_down_factor()
 
         self.cost = cost_volume_factory(model_config["cost_volume"])
