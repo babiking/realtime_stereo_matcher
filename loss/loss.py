@@ -23,6 +23,35 @@ def get_flow_map_metrics(flow_gt, flow_pred, flow_valid):
     return flow_metrics
 
 
+class BaseLossFactory(nn.Module):
+    def __init__(self, loss_configs, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        self.loss_configs = loss_configs
+
+        self.loss_funcs = []
+        self.loss_weights = []
+        for loss_config in loss_configs:
+            loss_type = loss_config["type"]
+            if loss_type == "SequenceLoss":
+                self.loss_funcs.append(SequenceLoss(**loss_config["parameters"]))
+            elif loss_type == "AdaptiveLoss":
+                self.loss_funcs.append(AdaptiveLoss(**loss_config["parameters"]))
+            else:
+                raise NotImplementedError(f"invalid loss type: {loss_type}!")
+
+            self.loss_weights.append(loss_config.get("weight", 1.0))
+
+    def forward(self, l_disp_gt, l_valid_gt, l_disp_preds, l_fmaps, r_fmaps):
+        loss = 0.0
+
+        for loss_weight, loss_func in zip(self.loss_weights, self.loss_funcs):
+            loss += loss_weight * loss_func(
+                l_disp_gt, l_valid_gt, l_disp_preds, l_fmaps, r_fmaps
+            )
+        return loss
+
+
 class SequenceLoss(nn.Module):
     def __init__(self, loss_gamma=0.9, max_flow_magnitude=700, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
