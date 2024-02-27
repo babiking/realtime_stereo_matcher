@@ -21,12 +21,12 @@ import gflags
 
 gflags.DEFINE_string(
     "experiment",
-    "configure/experiment_base_v1.json",
+    "configure/trainer_base_v1.json",
     "experiment configure json file",
 )
 gflags.DEFINE_string(
     "model",
-    "configure/stereo_base_net_v1.json",
+    "configure/stereo_base_net_v4.json",
     "experiment configure json file",
 )
 
@@ -62,16 +62,19 @@ class Logger:
         self.running_loss = {}
         self.log_dir = log_dir
         self.writer = SummaryWriter(
-            log_dir="runs" if self.log_dir is None else self.log_dir)
+            log_dir="runs" if self.log_dir is None else self.log_dir
+        )
 
     def _print_training_status(self):
         training_str = "[{:6d}, {:10.7f}] ".format(
-            self.total_steps + 1,
-            self.scheduler.get_last_lr()[0])
-        metrics_str = ", ".join([
-            f"{k}:{self.running_loss[k] / Logger.SUM_FREQ:.4f}"
-            for k in self.running_loss.keys()
-        ])
+            self.total_steps + 1, self.scheduler.get_last_lr()[0]
+        )
+        metrics_str = ", ".join(
+            [
+                f"{k}:{self.running_loss[k] / Logger.SUM_FREQ:.4f}"
+                for k in self.running_loss.keys()
+            ]
+        )
 
         # print the training status
         logging.info(
@@ -80,11 +83,13 @@ class Logger:
 
         if self.writer is None:
             self.writer = SummaryWriter(
-                log_dir="runs" if self.log_dir is None else self.log_dir)
+                log_dir="runs" if self.log_dir is None else self.log_dir
+            )
 
         for k in self.running_loss:
-            self.writer.add_scalar(k, self.running_loss[k] / Logger.SUM_FREQ,
-                                   self.total_steps)
+            self.writer.add_scalar(
+                k, self.running_loss[k] / Logger.SUM_FREQ, self.total_steps
+            )
             self.running_loss[k] = 0.0
 
     def push(self, metrics):
@@ -103,7 +108,8 @@ class Logger:
     def write_dict(self, results):
         if self.writer is None:
             self.writer = SummaryWriter(
-                log_dir="runs" if self.log_dir is None else self.log_dir)
+                log_dir="runs" if self.log_dir is None else self.log_dir
+            )
 
         for key in results:
             self.writer.add_scalar(key, results[key], self.total_steps)
@@ -124,10 +130,8 @@ def freeze_bn(model):
 
 def initialize(model):
     for m in model.modules():
-        if isinstance(m, nn.Conv2d):
-            nn.init.kaiming_normal_(m.weight,
-                                    mode="fan_out",
-                                    nonlinearity="relu")
+        if isinstance(m, (nn.Conv2d, nn.Conv3d)):
+            nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
         elif isinstance(m, (nn.BatchNorm2d, nn.InstanceNorm2d, nn.GroupNorm)):
             if m.weight is not None:
                 nn.init.constant_(m.weight, 1)
@@ -135,34 +139,39 @@ def initialize(model):
                 nn.init.constant_(m.bias, 0)
 
 
+def initialize_stereo_base_model(model):
+    for attr_name in ["extract", "cost", "aggregate", "regress", "refine"]:
+        module = model.__getattr__(attr_name)
+
+        if attr_name == "extract" and module.use_pretrain:
+            continue
+
+        initialize(module)
+
+
 def train(exp_config, model_config):
     model = nn.DataParallel(MobileStereoBase(model_config))
-    logging.info(
-        f"Model parameter count (pytorch): {count_parameters(model)}.")
+    logging.info(f"Model parameter count (pytorch): {count_parameters(model)}.")
 
     loss_func = build_loss_function(exp_config["train"]["loss"])
 
     train_loader = datasets.fetch_dataloader(exp_config)
     optimizer, scheduler = fetch_optimizer(exp_config, model)
     total_steps = 0
-    logger = Logger(model,
-                    scheduler,
-                    log_dir=os.path.join(exp_config["path"], "runs"))
+    logger = Logger(model, scheduler, log_dir=os.path.join(exp_config["path"], "runs"))
 
     model.cuda()
     model.train()
-    initialize(model.module)
+    initialize_stereo_base_model(model.module)
 
     restore_ckpt = exp_config["train"]["restore_checkpoint"]
     if restore_ckpt is not None and len(restore_ckpt) > 0:
-        assert restore_ckpt.endswith(".pth") or restore_ckpt.endswith(
-            ".pth.gz")
+        assert restore_ckpt.endswith(".pth") or restore_ckpt.endswith(".pth.gz")
         logging.info(f"Model loading checkpoint from {restore_ckpt}...")
         model.load_state_dict(torch.load(restore_ckpt), strict=True)
         logging.info(f"Done loading checkpoint.")
 
-    scaler = GradScaler(
-        enabled=model_config.get("mixed_precision", True))
+    scaler = GradScaler(enabled=model_config.get("mixed_precision", True))
 
     should_keep_training = True
     global_batch_num = 0
@@ -177,11 +186,10 @@ def train(exp_config, model_config):
 
             loss = loss_func(flow_predictions, flow, valid)
             metrics = get_flow_map_metrics(flow, flow_predictions[-1], valid)
-            logger.writer.add_scalar("live_loss", loss.item(),
-                                     global_batch_num)
-            logger.writer.add_scalar(f"learning_rate",
-                                     optimizer.param_groups[0]["lr"],
-                                     global_batch_num)
+            logger.writer.add_scalar("live_loss", loss.item(), global_batch_num)
+            logger.writer.add_scalar(
+                f"learning_rate", optimizer.param_groups[0]["lr"], global_batch_num
+            )
             global_batch_num += 1
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -203,8 +211,8 @@ def train(exp_config, model_config):
                 exp_name = exp_config["name"]
                 exp_path = exp_config["path"]
                 save_ckpt_file = os.path.join(
-                    exp_path,
-                    f"checkpoints/{exp_name}-epoch-{total_steps}.pth.gz")
+                    exp_path, f"checkpoints/{exp_name}-epoch-{total_steps}.pth.gz"
+                )
                 os.makedirs(os.path.dirname(save_ckpt_file), exist_ok=True)
                 logging.info(f"Saving file {save_ckpt_file}...")
                 torch.save(model.state_dict(), save_ckpt_file)
@@ -212,7 +220,8 @@ def train(exp_config, model_config):
     logging.info("FINISHED TRAINING!")
     logger.close()
     final_ckpt_file = os.path.join(
-        exp_path, f"checkpoints/{exp_name}-epoch-{total_steps}.pth.gz")
+        exp_path, f"checkpoints/{exp_name}-epoch-{total_steps}.pth.gz"
+    )
     torch.save(model.state_dict(), final_ckpt_file)
     return final_ckpt_file
 
@@ -226,12 +235,13 @@ def main():
 
     logging.basicConfig(
         level=logging.INFO,
-        format=
-        "%(asctime)s %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
+        format="%(asctime)s %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
     )
 
-    train(exp_config=json.load(open(FLAGS.experiment, "r")),
-          model_config=json.load(open(FLAGS.model, "r")))
+    train(
+        exp_config=json.load(open(FLAGS.experiment, "r")),
+        model_config=json.load(open(FLAGS.model, "r")),
+    )
 
 
 if __name__ == "__main__":
