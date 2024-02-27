@@ -6,7 +6,7 @@
         "restore_checkpoint": "",
         "save_checkpoint_frequency": 10000,
         "datasets": [
-            "middlebury_2014",
+            "middlebury_Q",
             "eth3d",
             "sceneflow/things",
             "sceneflow/driving",
