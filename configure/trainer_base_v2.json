@@ -1,6 +1,6 @@
 {
-    "name": "TRAINER_BASE_V4",
-    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/TRAINER_BASE_V4",
+    "name": "TRAINER_BASE_V5",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/TRAINER_BASE_V5",
     "train": {
         "batch_size": 8,
         "restore_checkpoint": "",
@@ -23,6 +23,14 @@
                     "max_flow_magnitude": 700
                 },
                 "weight": 1.0
+            },
+            {
+                "type": "LRConsistentLoss",
+                "parameters": {
+                    "loss_gamma": 0.9,
+                    "max_flow_magnitude": 700
+                },
+                "weight": 0.05
             }
         ]
     },
