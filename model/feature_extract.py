@@ -116,6 +116,7 @@ class MobileResidualFeatureExtract(BaseFeatureExtract):
         num_layers,
         expanse_ratios=None,
         dilations=None,
+        use_upsample=False,
         *args,
         **kwargs,
     ) -> None:
@@ -132,11 +133,11 @@ class MobileResidualFeatureExtract(BaseFeatureExtract):
             else [1 for _ in range(len(self.hidden_dims))]
         )
         assert len(self.hidden_dims) == len(self.expanse_ratios) == len(self.dilations)
+        self.use_upsample = use_upsample
 
         self.down_factor = self.get_down_factor()
 
         self.down_layers = nn.ModuleList([])
-
         for i in range(self.down_factor + 1):
             layer = self.make_layer(
                 num_layers=self.num_layers[i],
@@ -147,6 +148,18 @@ class MobileResidualFeatureExtract(BaseFeatureExtract):
                 dilation=self.dilations[i],
             )
             self.down_layers.append(layer)
+
+        self.up_layers = nn.ModuleList([])
+        if self.use_upsample:
+            for i in range(self.down_factor):
+                j = self.down_factor - i
+
+                layer = UpMergeConvT2d(
+                    in_dim=self.hidden_dims[j],
+                    out_dim=self.hidden_dims[j - 1],
+                    cat_dim=self.hidden_dims[j - 1],
+                )
+                self.up_layers.append(layer)
 
     def get_down_factor(self):
         return len(self.hidden_dims) - 1
@@ -185,7 +198,16 @@ class MobileResidualFeatureExtract(BaseFeatureExtract):
         for i, down_layer in enumerate(self.down_layers):
             x = down_layer(x)
             down_pyramid.append(x)
-        return [down_pyramid[n - 1 - i] for i in range(n)]
+        if not self.use_upsample:
+            return [down_pyramid[n - 1 - i] for i in range(n)]
+
+        up_pyramid = [down_pyramid[-1]]
+        for i, up_layer in enumerate(self.up_layers):
+            j = self.down_factor - i
+
+            y = up_layer(up_pyramid[i], down_pyramid[j - 1])
+            up_pyramid.append(y)
+        return up_pyramid
 
 
 class MobileNetV2FeatureExtract(BaseFeatureExtract):
