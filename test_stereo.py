@@ -28,7 +28,7 @@ gflags.DEFINE_string(
 )
 gflags.DEFINE_string(
     "left",
-    "/mnt/data/workspace/datasets/D435I/outdoor_stripe_plane/image/*_left_Img.bmp",
+    "/mnt/data/workspace/datasets/VM3140/image/*_left_Img.png",
     "left images",
 )
 gflags.DEFINE_list(
@@ -38,7 +38,7 @@ gflags.DEFINE_list(
 )
 gflags.DEFINE_string(
     "output",
-    "/mnt/data/workspace/datasets/D435I/outdoor_stripe_plane/disparity",
+    "/mnt/data/workspace/datasets/VM3140/predict",
     "output path",
 )
 gflags.DEFINE_boolean("use_onnx_inference", True,
@@ -140,8 +140,8 @@ def main():
         l_img_name = \
             os.path.splitext(os.path.basename(l_img_file))[0].replace(l_suffix, "")
 
-        l_img = cv.imread(l_img_file, cv.IMREAD_UNCHANGED)
-        r_img = cv.imread(r_img_file, cv.IMREAD_UNCHANGED)
+        l_img = cv.imread(l_img_file, cv.IMREAD_COLOR)
+        r_img = cv.imread(r_img_file, cv.IMREAD_COLOR)
 
         h, w = l_img.shape[:2]
 
