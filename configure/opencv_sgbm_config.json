@@ -1,5 +1,6 @@
 {
     "name": "OPENCV_SGBM_MODULE",
+    "path": "",
     "model": {
         "type": "OpenCVSGBMModule",
         "parameters": {
