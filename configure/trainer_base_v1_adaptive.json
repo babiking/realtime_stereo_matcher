@@ -5,8 +5,8 @@
         "batch_size": 1,
         "restore_checkpoint": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/TRAINER_BASE_V1/checkpoints/TRAINER_BASE_V1-epoch-200000.pth.gz",
         "save_checkpoint_frequency": 100,
-        "learn_rate": 0.00001,
-        "num_of_steps": 500,
+        "learn_rate": 0.0000003,
+        "num_of_steps": 1000,
         "weight_decay": 0.00001,
         "loss": {
             "type": "AdaptiveLoss",

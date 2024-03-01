@@ -162,7 +162,7 @@ def train(exp_config, model_config):
     model.train()
     initialize(model.module)
 
-    scaler = GradScaler(enabled=exp_config["model"].get("mixed_precision", False))
+    scaler = GradScaler(enabled=False)
 
     model.load_state_dict(
         torch.load(exp_config["train"]["restore_checkpoint"]), strict=True
@@ -176,12 +176,12 @@ def train(exp_config, model_config):
         for i, (img_files, l_img, r_img, flow, valid) in enumerate(dataloader):
             optimizer.zero_grad()
 
-            l_img = l_img.cuda().unsqueeze(0)
-            r_img = r_img.cuda().unsqueeze(0)
-            flow = flow.cuda().unsqueeze(0)
-            valid = valid.cuda().unsqueeze(0)
+            l_img = l_img.cuda()
+            r_img = r_img.cuda()
+            flow = flow.cuda()
+            valid = valid.cuda()
 
-            l_disps = model(l_img, r_img)
+            l_disps = model(l_img, r_img, is_train=False)
             loss = loss_func(
                 l_img,
                 r_img,
