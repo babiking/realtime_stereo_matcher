@@ -16,13 +16,14 @@ from loss import build_loss_function
 from loss.loss import get_flow_map_metrics
 import dataset.stereo_datasets as datasets
 from torch.cuda.amp import GradScaler
+from dataset.input_padder import InputPadder
 
 
 import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/raft_net_config.json",
+    "configure/other_fast_acv_net_config.json",
     "experiment configure json file",
 )
 
@@ -166,11 +167,24 @@ def train(exp_config):
             optimizer.zero_grad()
             image1, image2, flow, valid = [x.cuda() for x in data_blob]
 
+            valid = valid.unsqueeze(1)
+
+            padder = InputPadder(image1.shape, divis_by=64)
+            image1, image2 = padder.pad(image1, image2)
+
             assert model.training
             flow_predictions = model(image1, image2)
             assert model.training
 
-            loss = loss_func(flow_predictions, flow, valid)
+            flow_predictions = [padder.unpad(x) for x in flow_predictions]
+
+            loss = loss_func(
+                flow,
+                valid,
+                flow_predictions,
+                [None for _ in range(len(flow_predictions))],
+                [None for _ in range(len(flow_predictions))],
+            )
             metrics = get_flow_map_metrics(flow, flow_predictions[-1], valid)
             logger.writer.add_scalar("live_loss", loss.item(), global_batch_num)
             logger.writer.add_scalar(
