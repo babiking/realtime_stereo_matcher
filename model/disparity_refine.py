@@ -96,7 +96,7 @@ class ContextRefineNet(BaseRefineNet):
             l_disp, kernel_size=[self.fold_radius, self.fold_radius], padding=1
         ) * float(up_factor)
         l_disp_up = l_disp_up.view([n, c1, 1, h0, 1, w0])
-        l_disp_up = (l_disp_up * l_mask).mean(1).squeeze(1)
+        l_disp_up = (l_disp_up * l_mask).sum(1).squeeze(1)
 
         l_disp_up = l_disp_up.view([n, 1, h1, w1])
         return l_disp_up
