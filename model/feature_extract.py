@@ -9,9 +9,7 @@ def feature_extract_factory(config):
     extract_type = config["type"]
     if extract_type == "unet":
         return UNetFeatureExtract(**config["arguments"])
-    elif extract_type == "mobile_residual":
-        return MobileResidualFeatureExtract(**config["arguments"])
-    elif extract_type == "mobile_net_v2_pretrain":
+    elif extract_type == "mobile_v2":
         return MobileNetV2FeatureExtract(**config["arguments"])
     else:
         raise NotImplementedError(f"invalid feature extractor type: {extract_type}!")
@@ -108,142 +106,113 @@ class UNetFeatureExtract(BaseFeatureExtract):
         return up_pyramid
 
 
-class MobileResidualFeatureExtract(BaseFeatureExtract):
-    def __init__(
-        self,
-        hidden_dims,
-        use_pretrain,
-        num_layers,
-        expanse_ratios=None,
-        dilations=None,
-        use_upsample=False,
-        *args,
-        **kwargs,
-    ) -> None:
-        super().__init__(hidden_dims, use_pretrain, *args, **kwargs)
-        self.num_layers = num_layers
-        self.expanse_ratios = (
-            expanse_ratios
-            if expanse_ratios is not None
-            else [1 for _ in range(len(self.hidden_dims))]
+class MobileNetV2FeatureUpsample(nn.Module):
+    def __init__(self, hidden_dims, up_dim, *args, **kwargs):
+        super(MobileNetV2FeatureUpsample, self).__init__(*args, **kwargs)
+
+        self.hidden_dims = hidden_dims
+        self.up_dim = up_dim
+
+        self.deconv32_16 = Conv2x(
+            hidden_dims[4], hidden_dims[3], deconv=True, concat=True
         )
-        self.dilations = (
-            dilations
-            if dilations is not None
-            else [1 for _ in range(len(self.hidden_dims))]
+
+        self.deconv16_8 = Conv2x(
+            hidden_dims[3] * 2, hidden_dims[2], deconv=True, concat=True
         )
-        assert len(self.hidden_dims) == len(self.expanse_ratios) == len(self.dilations)
-        self.use_upsample = use_upsample
 
-        self.down_factor = self.get_down_factor()
+        self.deconv8_4 = Conv2x(
+            hidden_dims[2] * 2, hidden_dims[1], deconv=True, concat=True
+        )
+        self.conv4 = BasicConv(
+            hidden_dims[1] * 2, hidden_dims[1] * 2, kernel_size=3, stride=1, padding=1
+        )
 
-        self.down_layers = nn.ModuleList([])
-        for i in range(self.down_factor + 1):
-            layer = self.make_layer(
-                num_layers=self.num_layers[i],
-                in_dim=(3 if i == 0 else self.hidden_dims[i - 1]),
-                out_dim=self.hidden_dims[i],
-                stride=(1 if i == 0 else 2),
-                expanse_ratio=self.expanse_ratios[i],
-                dilation=self.dilations[i],
-            )
-            self.down_layers.append(layer)
+        self.deconv4_2 = Conv2x(
+            hidden_dims[1] * 2, hidden_dims[0], deconv=True, concat=True
+        )
+        self.conv2 = BasicConv(
+            hidden_dims[0] * 2, hidden_dims[0] * 2, kernel_size=3, stride=1, padding=1
+        )
 
-        self.up_layers = nn.ModuleList([])
-        if self.use_upsample:
-            for i in range(self.down_factor):
-                j = self.down_factor - i
+        self.deconv2_1 = Conv2x(hidden_dims[1] * 2, up_dim, deconv=True, concat=True)
+        self.conv1 = BasicConv(
+            up_dim * 2, up_dim * 2, kernel_size=1, stride=1, padding=0
+        )
 
-                layer = UpMergeConvT2d(
-                    in_dim=self.hidden_dims[j],
-                    out_dim=self.hidden_dims[j - 1],
-                    cat_dim=self.hidden_dims[j - 1],
+        self.weight_init()
+
+    def weight_init(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+                m.weight.data.normal_(0, math.sqrt(2.0 / n))
+            elif isinstance(m, nn.Conv3d):
+                n = (
+                    m.kernel_size[0]
+                    * m.kernel_size[1]
+                    * m.kernel_size[2]
+                    * m.out_channels
                 )
-                self.up_layers.append(layer)
+                m.weight.data.normal_(0, math.sqrt(2.0 / n))
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+            elif isinstance(m, nn.BatchNorm3d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
 
-    def get_down_factor(self):
-        return len(self.hidden_dims) - 1
+    def forward(self, down_pyramid):
+        x2, x4, x8, x16, x32 = down_pyramid
 
-    def make_layer(self, num_layers, in_dim, out_dim, stride, expanse_ratio, dilation):
-        layers = []
-
-        layers.append(
-            MobileResidualBlockV2(
-                in_dim=in_dim,
-                out_dim=out_dim,
-                stride=stride,
-                expanse_ratio=expanse_ratio,
-                dilation=dilation,
-            )
-        )
-        layers.append(nn.LeakyReLU(0.2))
-
-        for _ in range(num_layers):
-            layers.append(
-                MobileResidualBlockV2(
-                    in_dim=out_dim,
-                    out_dim=out_dim,
-                    stride=1,
-                    expanse_ratio=1,
-                    dilation=1,
-                )
-            )
-            layers.append(nn.LeakyReLU(0.2))
-        return nn.Sequential(*layers)
-
-    def forward(self, x):
-        n = len(self.down_layers)
-
-        down_pyramid = []
-        for i, down_layer in enumerate(self.down_layers):
-            x = down_layer(x)
-            down_pyramid.append(x)
-        if not self.use_upsample:
-            return [down_pyramid[n - 1 - i] for i in range(n)]
-
-        up_pyramid = [down_pyramid[-1]]
-        for i, up_layer in enumerate(self.up_layers):
-            j = self.down_factor - i
-
-            y = up_layer(up_pyramid[i], down_pyramid[j - 1])
-            up_pyramid.append(y)
-        return up_pyramid
+        y16 = self.deconv32_16(x32, x16)
+        y8 = self.deconv16_8(y16, x8)
+        y4 = self.conv4(self.deconv8_4(y8, x4))
+        y2 = self.conv2(self.deconv4_2(y4, x2))
+        y1 = self.conv1(self.deconv2_1(y2))
+        return [y8, y4, y2, y1]
 
 
 class MobileNetV2FeatureExtract(BaseFeatureExtract):
     def __init__(
-        self, hidden_dims=[32, 16, 24, 32], use_pretrain=True, *args, **kwargs
+        self,
+        layer_idxs=[1, 2, 3, 5, 6],
+        hidden_dims=[16, 24, 32, 96, 160],
+        use_pretrain=True,
+        up_dim=16,
+        *args,
+        **kwargs,
     ):
         super().__init__(hidden_dims, use_pretrain, *args, **kwargs)
-
-        self.layers = [1, 2, 3, 5, 6]
+        self.layer_idxs = layer_idxs
+        self.hidden_dims = hidden_dims
+        self.use_pretrain = use_pretrain
+        self.up_dim = up_dim
 
         model = timm.create_model(
-            "mobilenetv2_100", pretrained=self.use_pretrain, features_only=True
+            "mobilenetv2_100", pretrained=True, features_only=True
         )
-
         self.conv_stem = model.conv_stem
         self.bn1 = model.bn1
-        self.act1 = nn.LeakyReLU(0.2)  # model.act1
+        self.act1 = nn.ReLU()  # model.act1
 
-        self.block0 = torch.nn.Sequential(*model.blocks[0 : self.layers[0]])
-        self.block1 = torch.nn.Sequential(
-            *model.blocks[self.layers[0] : self.layers[1]]
-        )
-        self.block2 = torch.nn.Sequential(
-            *model.blocks[self.layers[1] : self.layers[2]]
-        )
-        # self.block3 = torch.nn.Sequential(*model.blocks[self.layers[2] : self.layers[3]])
-        # self.block4 = torch.nn.Sequential(*model.blocks[self.layers[3] : self.layers[4]])
+        self.block0 = torch.nn.Sequential(*model.blocks[0 : layer_idxs[0]])
+        self.block1 = torch.nn.Sequential(*model.blocks[layer_idxs[0] : layer_idxs[1]])
+        self.block2 = torch.nn.Sequential(*model.blocks[layer_idxs[1] : layer_idxs[2]])
+        self.block3 = torch.nn.Sequential(*model.blocks[layer_idxs[2] : layer_idxs[3]])
+        self.block4 = torch.nn.Sequential(*model.blocks[layer_idxs[3] : layer_idxs[4]])
+
+        self.upsample = MobileNetV2FeatureUpsample(hidden_dims, up_dim)
 
     def get_down_factor(self):
-        return len(self.hidden_dims) - 1
+        return len(self.hidden_dims)
 
     def forward(self, x):
-        x1 = self.act1(self.bn1(self.conv_stem(x)))
-        x2 = self.block0(x1)
+        x = self.act1(self.bn1(self.conv_stem(x)))
+        x2 = self.block0(x)
         x4 = self.block1(x2)
         x8 = self.block2(x4)
-        # x16 = self.block3(x8)
-        # x32 = self.block4(x16)
-        return [x8, x4, x2, x1]
+        x16 = self.block3(x8)
+        x32 = self.block4(x16)
+
+        return self.upsample([x2, x4, x8, x16, x32])
