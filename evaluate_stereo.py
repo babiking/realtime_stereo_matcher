@@ -17,12 +17,12 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/stereo_net_config_v3.json",
+    "configure/other_fast_acv_net_config.json",
     "experiment configure json file",
 )
 gflags.DEFINE_string(
     "model_chkpt_file",
-    "experiments/200K_STEREO_NET_V3/checkpoints/200K_STEREO_NET_V3-epoch-200000.pth.gz",
+    "others/fast_acv_net/checkpoint/Fast_ACVNet_generalization.ckpt",
     "model checkpont file",
 )
 
@@ -213,29 +213,47 @@ def validate_kitti(model, mixed_prec=False):
             & (torch.isnan(flow_pr.flatten()) == 0)
             & (flow_pr.flatten() > 0.0)
         )
-
-        out = epe_flattened > 1.0
-        image_out = out[val].float().mean().item()
+        out_0_5 = epe_flattened > 0.5
+        out_1_0 = epe_flattened > 1.0
+        out_3_0 = epe_flattened > 3.0
+        out_5_0 = epe_flattened > 5.0
+        image_out = [
+            out_0_5[val].float().mean().item(),
+            out_1_0[val].float().mean().item(),
+            out_3_0[val].float().mean().item(),
+            out_5_0[val].float().mean().item(),
+        ]
         image_epe = epe_flattened[val].mean().item()
         image_fps = 1.0 / (end - start)
         if val_id < 9 or (val_id + 1) % 10 == 0:
             logging.info(
-                f"KITTI {val_id+1} out of {len(val_dataset)}. EPE: {image_epe:.4f}, D1: {image_out:.4f}, FPS: {image_fps:.4f}."
+                f"KITTI {val_id+1} out of {len(val_dataset)}. EPE: {image_epe:.4f}, D1: {image_out[1]:.4f}, FPS: {image_fps:.4f}."
             )
-        epe_list.append(epe_flattened[val].mean().item())
-        out_list.append(out[val].cpu().numpy())
+
+        epe_list.append(image_epe)
+        out_list.append(image_out)
         fps_list.append(image_fps)
 
     epe_list = np.array(epe_list)
-    out_list = np.concatenate(out_list)
+    out_list = np.array(out_list)
     fps_list = np.array(fps_list)
 
     epe = np.mean(epe_list)
-    d1 = 100 * np.mean(out_list)
+    bads = 100 * np.mean(out_list, axis=0)
     fps = np.mean(fps_list)
 
-    print("Validation KITTI: EPE %.4f, D1 %.4f, FPS: %.4f" % (epe, d1, fps))
-    return {"kitti-epe": epe, "kitti-d1": d1, "kitti-fps": fps}
+    print(
+        "Validation KITTI: EPE=%.4f, bad0.5=%.4f, bad1.0=%.4f, bad3.0=%.4f, bad5.0=%.4f, FPS=%.4f"
+        % (epe, bads[0], bads[1], bads[2], bads[3], fps)
+    )
+    return {
+        "kitti-epe": epe,
+        "kitti-bad0.5": bads[0],
+        "kitti-bad1.0": bads[1],
+        "kitti-bad3.0": bads[2],
+        "kitti-bad5.0": bads[3],
+        "kitti-fps": fps,
+    }
 
 
 @torch.no_grad()
@@ -418,6 +436,7 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = torch.nn.DataParallel(build_model(exp_config["model"])).to(device)
+    model.eval()
 
     sample = torch.rand(size=(1, 3, 480, 640), dtype=torch.float32).to(device)
     _ = get_model_capacity(
@@ -426,13 +445,13 @@ def main():
     del sample
     torch.cuda.empty_cache()
 
-    model.cuda()
-    model.eval()
-
     if "train" in exp_config:
         logging.info(f"Loading checkpoint: {FLAGS.model_chkpt_file}...")
         checkpoint = torch.load(FLAGS.model_chkpt_file)
-        model.load_state_dict(checkpoint, strict=True)
+        try:
+            model.load_state_dict(checkpoint, strict=True)
+        except:
+            model.load_state_dict(checkpoint["model"], strict=True)
         logging.info(f"Done loading checkpoint.")
 
         # print(

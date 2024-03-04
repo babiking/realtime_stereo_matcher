@@ -1,0 +1,55 @@
+{
+    "name": "FAST_ACV_NET_OFFICIAL",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/FAST_ACV_NET_OFFICIAL",
+    "train": {
+        "batch_size": 8,
+        "restore_checkpoint": "",
+        "save_checkpoint_frequency": 10000,
+        "datasets": [
+            "middlebury_2014",
+            "eth3d",
+            "sceneflow/things",
+            "sceneflow/driving",
+            "kitti"
+        ],
+        "learn_rate": 0.0002,
+        "num_of_steps": 200000,
+        "weight_decay": 0.00001,
+        "loss": {
+            "type": "SequenceLoss",
+            "parameters": {
+                "loss_gamma": 0.9,
+                "max_flow_magnitude": 700
+            }
+        }
+    },
+    "test": {
+        "datasets": [
+            "realsense"
+        ]
+    },
+    "model": {
+        "type": "OtherFastACVNet",
+        "parameters": {
+            "maxdisp": 192,
+            "att_weights_only": false
+        }
+    },
+    "data": {
+        "image_size": [
+            240,
+            320
+        ],
+        "image_gamma": [],
+        "spatial_scale": [
+            -0.2,
+            0.4
+        ],
+        "saturation_range": [
+            0,
+            1.4
+        ],
+        "do_flip": false,
+        "no_y_jitter": false
+    }
+}
