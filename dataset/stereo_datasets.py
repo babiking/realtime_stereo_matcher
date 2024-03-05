@@ -133,13 +133,17 @@ class RealsenseDataset(StereoDataset):
         aug_params=None,
         sparse=True,
         data_path="/mnt/data/workspace/datasets/MyRealsense",
+        split="train"
     ):
         super().__init__(
             aug_params, sparse=sparse, reader=frame_utils.readDispRealsense
         )
 
-        for sub_name in os.listdir(data_path):
-            sub_path = os.path.join(data_path, sub_name)
+        self.split = split
+        self.split_path = os.path.join(data_path, split)
+
+        for sub_name in os.listdir(self.split_path):
+            sub_path = os.path.join(self.split_path, sub_name)
 
             if not os.path.isdir(sub_path):
                 continue
@@ -490,14 +494,18 @@ def fetch_dataloader(exp_config):
     train_dataset = None
     for dataset_name in exp_config["train"]["datasets"]:
         new_dataset = []
-        if dataset_name == "realsense":
+        if "realsense" in dataset_name:
             new_dataset = RealsenseDataset(
-                aug_params, data_path="/mnt/data/workspace/datasets/MyRealsense"
+                aug_params,
+                data_path="/mnt/data/workspace/datasets/MyRealsense",
+                split=dataset_name.split("_")[-1],
             )
             logging.info(f"Adding {len(new_dataset)} samples from Realsense")
         elif dataset_name.startswith("middlebury_"):
             new_dataset = Middlebury(
-                aug_params, split=dataset_name.replace("middlebury_", "")
+                aug_params,
+                root="/mnt/data/workspace/datasets/Middlebury",
+                split=dataset_name.replace("middlebury_", ""),
             )
             logging.info(f"Adding {len(new_dataset)} samples from Middlebury")
         elif dataset_name == "sceneflow/things":

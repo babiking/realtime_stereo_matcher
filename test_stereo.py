@@ -18,17 +18,17 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/stereo_net_config_v3.json",
+    "configure/other_fast_acv_net_config.json",
     "experiment configure json file",
 )
 gflags.DEFINE_string(
     "model_chkpt_file",
-    "experiments/200K_STEREO_NET_V3/checkpoints/200K_STEREO_NET_V3-epoch-200000.pth.gz",
+    "others/fast_acv_net/checkpoint/Fast_ACVNet_generalization.ckpt",
     "model checkpont file",
 )
 gflags.DEFINE_string(
     "left",
-    "/mnt/data/workspace/datasets/VM3140/image/*_left_Img.png",
+    "/mnt/data/workspace/datasets/MyRealsense/20240229_desktop_0000/image/*_off_left_Img.png",
     "left images",
 )
 gflags.DEFINE_list(
@@ -38,11 +38,12 @@ gflags.DEFINE_list(
 )
 gflags.DEFINE_string(
     "output",
-    "/mnt/data/workspace/datasets/VM3140/predict",
+    "/mnt/data/workspace/datasets/MyRealsense/20240229_desktop_0000/predict",
     "output path",
 )
-gflags.DEFINE_boolean("use_onnx_inference", True,
-                      "if set, use onnx inference instead of pytorch")
+gflags.DEFINE_boolean(
+    "use_onnx_inference", True, "if set, use onnx inference instead of pytorch"
+)
 
 autocast = torch.cuda.amp.autocast
 
@@ -78,7 +79,7 @@ def run_onnx_inference(l_img, r_img, onnx_file):
         None,
         {
             "input0": l_img.cpu().detach().numpy().astype(np.float32),
-            "input1": r_img.cpu().detach().numpy().astype(np.float32)
+            "input1": r_img.cpu().detach().numpy().astype(np.float32),
         },
     )
     return outputs
@@ -90,14 +91,14 @@ def main():
 
     logging.basicConfig(
         level=logging.INFO,
-        format=
-        "%(asctime)s %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
+        format="%(asctime)s %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
     )
 
     exp_config = json.load(open(FLAGS.exp_config_json, "r"))
 
     model = torch.nn.DataParallel(build_model(exp_config["model"])).to(
-        torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+        torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    )
 
     model.cuda()
     model.eval()
@@ -105,7 +106,10 @@ def main():
     if "train" in exp_config:
         logging.info(f"Loading checkpoint: {FLAGS.model_chkpt_file}...")
         checkpoint = torch.load(FLAGS.model_chkpt_file)
-        model.load_state_dict(checkpoint, strict=True)
+        try:
+            model.load_state_dict(checkpoint, strict=True)
+        except:
+            model.load_state_dict(checkpoint["model"], strict=True)
         logging.info(f"Done loading checkpoint.")
 
         print(
@@ -119,8 +123,8 @@ def main():
         export_stereo_model_to_onnx(
             model,
             onnx_file=onnx_file,
-            device=torch.device(
-                "cuda" if torch.cuda.is_available() else "cpu"))
+            device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+        )
 
     # The CUDA implementations of the correlation volume prevent half-precision
     # rounding errors in the correlation lookup. This allows us to use mixed precision
@@ -137,8 +141,9 @@ def main():
         if not os.path.exists(r_img_file):
             continue
 
-        l_img_name = \
-            os.path.splitext(os.path.basename(l_img_file))[0].replace(l_suffix, "")
+        l_img_name = os.path.splitext(os.path.basename(l_img_file))[0].replace(
+            l_suffix, ""
+        )
 
         l_img = cv.imread(l_img_file, cv.IMREAD_COLOR)
         r_img = cv.imread(r_img_file, cv.IMREAD_COLOR)
@@ -158,19 +163,20 @@ def main():
             start = time.time()
             if FLAGS.use_onnx_inference:
                 flow_pr = run_onnx_inference(
-                    l_img=F.interpolate(l_img,
-                                        size=(480, 640),
-                                        mode="bilinear",
-                                        align_corners=True),
-                    r_img=F.interpolate(r_img,
-                                        size=(480, 640),
-                                        mode="bilinear",
-                                        align_corners=True),
-                    onnx_file=onnx_file)[-1]
+                    l_img=F.interpolate(
+                        l_img, size=(480, 640), mode="bilinear", align_corners=True
+                    ),
+                    r_img=F.interpolate(
+                        r_img, size=(480, 640), mode="bilinear", align_corners=True
+                    ),
+                    onnx_file=onnx_file,
+                )[-1]
                 flow_pr = torch.tensor(flow_pr, dtype=torch.float32).squeeze(0)
             else:
-                padder = InputPadder(\
-                l_img.shape, divis_by=2**exp_config["model"].get("downsample_factor", 6))
+                padder = InputPadder(
+                    l_img.shape,
+                    divis_by=2 ** exp_config["model"].get("downsample_factor", 3),
+                )
                 l_img, r_img = padder.pad(l_img, r_img)
 
                 flow_pr = model(l_img, r_img)[-1]
@@ -181,16 +187,13 @@ def main():
             fps = 1.0 / (end - start)
             print(f"The model inference on {l_img_file} FPS: {fps:.4f}.")
 
-        flow_pr = -1.0 * np.squeeze(flow_pr.cpu().detach().numpy(),
-                                    axis=0).astype(np.float32)
+        flow_pr = np.squeeze(flow_pr.cpu().detach().numpy(), axis=0).astype(np.float32)
         flow_color = colorize_2d_matrix(flow_pr, min_val=1.0, max_val=64.0)
 
-        flow_pfm_file = os.path.join(save_path,
-                                     f"{l_img_name}_{w}x{h}_disparity.pfm")
+        flow_pfm_file = os.path.join(save_path, f"{l_img_name}_{w}x{h}_disparity.pfm")
         write_pfm_file(flow_pfm_file, np.flipud(flow_pr), 1.0)
 
-        flow_color_file = os.path.join(save_path,
-                                       f"{l_img_name}_{w}x{h}_disparity.png")
+        flow_color_file = os.path.join(save_path, f"{l_img_name}_{w}x{h}_disparity.png")
         cv.imwrite(flow_color_file, flow_color)
 
 

@@ -530,15 +530,15 @@ class Fast_ACVNet(nn.Module):
             pred_att = torch.sum(att_prob * disparity_sample_topk, dim=1)
             pred_att_up = context_upsample(pred_att.unsqueeze(1), spx_pred)
             if self.att_weights_only:
-                return [pred_att.unsqueeze(1) * 4, pred_att_up.unsqueeze(1) * 4]
+                return [pred_att.unsqueeze(1), pred_att_up.unsqueeze(1) * 4.0]
             else:
                 pred = regression_topk(cost.squeeze(1), disparity_sample_topk, 2)
                 pred_up = context_upsample(pred, spx_pred)
                 return [
-                    pred_att.unsqueeze(1) * 4,
-                    pred.squeeze(1).unsqueeze(1) * 4,
-                    pred_att_up.unsqueeze(1) * 4,
-                    pred_up.unsqueeze(1) * 4,
+                    pred_att.unsqueeze(1),
+                    pred.squeeze(1).unsqueeze(1),
+                    pred_att_up.unsqueeze(1) * 4.0,
+                    pred_up.unsqueeze(1) * 4.0,
                 ]
 
         else:
@@ -547,8 +547,8 @@ class Fast_ACVNet(nn.Module):
                 att_prob = F.softmax(att_prob, dim=1)
                 pred_att = torch.sum(att_prob * disparity_sample_topk, dim=1)
                 pred_att_up = context_upsample(pred_att.unsqueeze(1), spx_pred)
-                return [pred_att_up.unsqueeze(1) * 4]
+                return [pred_att_up.unsqueeze(1) * 4.0]
 
             pred = regression_topk(cost.squeeze(1), disparity_sample_topk, 2)
             pred_up = context_upsample(pred, spx_pred)
-            return [pred_up.unsqueeze(1) * 4]
+            return [pred_up.unsqueeze(1) * 4.0]

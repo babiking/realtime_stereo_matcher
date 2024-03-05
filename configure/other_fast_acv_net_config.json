@@ -1,19 +1,15 @@
 {
-    "name": "FAST_ACV_NET_OFFICIAL",
-    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/FAST_ACV_NET_OFFICIAL",
+    "name": "FAST_ACV_NET_FINETUNE",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/FAST_ACV_NET_FINETUNE",
     "train": {
-        "batch_size": 8,
+        "batch_size": 4,
         "restore_checkpoint": "/mnt/data/workspace/github/realtime_stereo_matcher/others/fast_acv_net/checkpoint/Fast_ACVNet_generalization.ckpt",
-        "save_checkpoint_frequency": 10000,
+        "save_checkpoint_frequency": 1000,
         "datasets": [
-            "middlebury_Q",
-            "eth3d",
-            "sceneflow/things",
-            "sceneflow/driving",
-            "kitti"
+            "realsense_train"
         ],
-        "learn_rate": 0.0002,
-        "num_of_steps": 200000,
+        "learn_rate": 0.000004,
+        "num_of_steps": 10000,
         "weight_decay": 0.00001,
         "loss": {
             "type": "SequenceLoss",
@@ -25,7 +21,7 @@
     },
     "test": {
         "datasets": [
-            "realsense",
+            "realsense_test",
             "middlebury_Q",
             "kitti"
         ]
@@ -39,8 +35,8 @@
     },
     "data": {
         "image_size": [
-            240,
-            320
+            480,
+            640
         ],
         "image_gamma": [],
         "spatial_scale": [
