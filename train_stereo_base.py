@@ -21,12 +21,12 @@ import gflags
 
 gflags.DEFINE_string(
     "experiment",
-    "configure/trainer_base_v2.json",
+    "configure/trainer_base_v1.json",
     "experiment configure json file",
 )
 gflags.DEFINE_string(
     "model",
-    "configure/stereo_base_net_v5.json",
+    "configure/stereo_base_net_v3.json",
     "experiment configure json file",
 )
 

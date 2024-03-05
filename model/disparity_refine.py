@@ -242,7 +242,4 @@ class DilateRefineNet(BaseRefineNet):
 
             l_disp_pyramid.append(l_disp)
 
-        if is_train:
-            return [l_disp] + l_disp_pyramid, l_fmaps, r_fmaps
-        else:
-            return l_disp_pyramid
+        return ([l_disp] + l_disp_pyramid) if is_train else l_disp_pyramid

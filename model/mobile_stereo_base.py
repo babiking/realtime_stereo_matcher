@@ -75,7 +75,7 @@ class MobileStereoBase(nn.Module):
         )
 
         if is_train:
-            return l_disp_pyramid
+            return l_disp_pyramid, l_fmaps, r_fmaps
         else:
             if src_h != dst_h or src_w != dst_w:
                 l_disp_pyramid[-1] = l_disp_pyramid[-1][:, :, :src_h, :src_w]
