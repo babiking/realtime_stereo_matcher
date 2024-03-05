@@ -135,10 +135,16 @@ class MobileNetV2FeatureUpsample(nn.Module):
             hidden_dims[0] * 2, hidden_dims[0] * 2, kernel_size=3, stride=1, padding=1
         )
 
-        self.deconv2_1 = Conv2x(hidden_dims[1] * 2, up_dim, deconv=True, concat=True)
-        self.conv1 = BasicConv(
-            up_dim * 2, up_dim * 2, kernel_size=1, stride=1, padding=0
+        self.deconv2_1 = BasicConv(
+            hidden_dims[0] * 2,
+            up_dim,
+            deconv=True,
+            kernel_size=3,
+            stride=2,
+            padding=1,
+            output_padding=1,
         )
+        self.conv1 = BasicConv(up_dim, up_dim, kernel_size=1, stride=1, padding=0)
 
         self.weight_init()
 

@@ -1,33 +1,24 @@
 {
     "model_name": "MobileStereoBaseV3",
     "feature_extract": {
-        "type": "mobile_residual",
+        "type": "mobile_v2",
         "arguments": {
+            "layer_idxs": [
+                1,
+                2,
+                3,
+                5,
+                6
+            ],
             "hidden_dims": [
+                16,
+                24,
                 32,
-                32,
-                32,
-                32
+                96,
+                160
             ],
-            "use_pretrain": false,
-            "num_layers": [
-                2,
-                2,
-                2,
-                4
-            ],
-            "expanse_ratios": [
-                1,
-                1,
-                1,
-                1
-            ],
-            "dilations": [
-                1,
-                1,
-                1,
-                1
-            ]
+            "use_pretrain": true,
+            "up_dim": 16
         }
     },
     "cost_volume": {
@@ -39,7 +30,7 @@
     "cost_aggregate": {
         "type": "conv_3d",
         "arguments": {
-            "in_dim": 32,
+            "in_dim": 64,
             "hidden_dims": [
                 32,
                 32,
@@ -57,9 +48,9 @@
         "type": "dilate",
         "arguments": {
             "in_dims": [
+                48,
                 32,
-                32,
-                32
+                16
             ],
             "hidden_dims": [
                 32,
