@@ -21,12 +21,12 @@ import gflags
 
 gflags.DEFINE_string(
     "experiment",
-    "configure/trainer_base_v1.json",
+    "configure/trainer_base_v2.json",
     "experiment configure json file",
 )
 gflags.DEFINE_string(
     "model",
-    "configure/stereo_base_net_v4.json",
+    "configure/stereo_base_net_v5.json",
     "experiment configure json file",
 )
 
@@ -168,7 +168,10 @@ def train(exp_config, model_config):
     if restore_ckpt is not None and len(restore_ckpt) > 0:
         assert restore_ckpt.endswith(".pth") or restore_ckpt.endswith(".pth.gz")
         logging.info(f"Model loading checkpoint from {restore_ckpt}...")
-        model.load_state_dict(torch.load(restore_ckpt), strict=True)
+        try:
+            model.load_state_dict(torch.load(restore_ckpt), strict=True)
+        except:
+            model.load_state_dict(torch.load(restore_ckpt)["model"], strict=True)
         logging.info(f"Done loading checkpoint.")
 
     scaler = GradScaler(enabled=model_config.get("mixed_precision", True))
@@ -180,8 +183,8 @@ def train(exp_config, model_config):
             optimizer.zero_grad()
             image1, image2, flow, valid = [x.cuda() for x in data_blob]
 
-            flow = model.module.pad(flow.squeeze(1))
-            valid = model.module.pad(valid.squeeze(1))
+            flow = model.module.pad(flow)
+            valid = model.module.pad(valid.unsqueeze(1))
 
             assert model.training
             flow_predictions, l_fmaps, r_fmaps = model(image1, image2)

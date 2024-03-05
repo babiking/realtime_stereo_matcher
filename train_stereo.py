@@ -153,9 +153,16 @@ def train(exp_config):
 
     restore_ckpt = exp_config["train"]["restore_checkpoint"]
     if restore_ckpt is not None and len(restore_ckpt) > 0:
-        assert restore_ckpt.endswith(".pth") or restore_ckpt.endswith(".pth.gz")
+        assert (
+            restore_ckpt.endswith(".pth")
+            or restore_ckpt.endswith(".pth.gz")
+            or restore_ckpt.endswith(".ckpt")
+        )
         logging.info(f"Model loading checkpoint from {restore_ckpt}...")
-        model.load_state_dict(torch.load(restore_ckpt), strict=True)
+        try:
+            model.load_state_dict(torch.load(restore_ckpt), strict=True)
+        except:
+            model.load_state_dict(torch.load(restore_ckpt)["model"], strict=True)
         logging.info(f"Done loading checkpoint.")
 
     scaler = GradScaler(enabled=exp_config["model"].get("mixed_precision", True))
