@@ -18,17 +18,17 @@ import gflags
 
 gflags.DEFINE_string(
     "base_config_json",
-    "configure/stereo_base_net_v1.json",
+    "configure/stereo_base_net_v3.json",
     "experiment configure json file",
 )
 gflags.DEFINE_string(
     "model_chkpt_file",
-    "experiments/TRAINER_BASE_V1/checkpoints/TRAINER_BASE_V1-epoch-200000.pth.gz",
+    "experiments/TRAINER_BASE_V3/checkpoints/TRAINER_BASE_V3-epoch-100000.pth.gz",
     "model checkpont file",
 )
 gflags.DEFINE_string(
     "left",
-    "/mnt/data/workspace/datasets/MyRealsense/20240226_fabric_0000//image/*_off_left_Img.png",
+    "/mnt/data/workspace/datasets/MyRealsense/test/20240229_desktop_0000/image/*_off_left_Img.png",
     "left images",
 )
 gflags.DEFINE_list(
@@ -38,11 +38,11 @@ gflags.DEFINE_list(
 )
 gflags.DEFINE_string(
     "output",
-    "/mnt/data/workspace/datasets/MyRealsense/20240226_fabric_0000//predict",
+    "/mnt/data/workspace/datasets/MyRealsense/test/20240229_desktop_0000/predict",
     "output path",
 )
 gflags.DEFINE_boolean(
-    "use_onnx_inference", True, "if set, use onnx inference instead of pytorch"
+    "use_onnx_inference", False, "if set, use onnx inference instead of pytorch"
 )
 
 autocast = torch.cuda.amp.autocast

@@ -17,12 +17,12 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/other_fast_acv_net_config.json",
+    "configure/stereo_net_config_v3_finetune.json",
     "experiment configure json file",
 )
 gflags.DEFINE_string(
     "model_chkpt_file",
-    "others/fast_acv_net/checkpoint/Fast_ACVNet_generalization.ckpt",
+    "experiments/STEREO_NET_V3_FINETUNE/checkpoints/STEREO_NET_V3_FINETUNE-epoch-4000.pth.gz",
     "model checkpont file",
 )
 
@@ -38,7 +38,7 @@ def validate_realsense(model, mixed_prec=False):
     """Peform validation using the Realsense (train) split"""
     model.eval()
     aug_params = {}
-    val_dataset = datasets.RealsenseDataset(aug_params)
+    val_dataset = datasets.RealsenseDataset(aug_params, split="test")
 
     out_list, epe_list, fps_list = [], [], []
     for val_id in range(len(val_dataset)):
@@ -464,7 +464,7 @@ def main():
     use_mixed_precision = exp_config["model"].get("mixed_precision", True)
 
     for dataset in exp_config["test"]["datasets"]:
-        if dataset == "realsense":
+        if dataset == "realsense_test":
             validate_realsense(model, mixed_prec=use_mixed_precision)
 
         elif dataset == "eth3d":

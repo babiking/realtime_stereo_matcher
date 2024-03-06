@@ -28,7 +28,7 @@ gflags.DEFINE_string(
 )
 gflags.DEFINE_string(
     "left",
-    "/mnt/data/workspace/datasets/MyRealsense/20240229_desktop_0000/image/*_off_left_Img.png",
+    "/mnt/data/workspace/datasets/VM3140/image/*_left_Img.png",
     "left images",
 )
 gflags.DEFINE_list(
@@ -38,7 +38,7 @@ gflags.DEFINE_list(
 )
 gflags.DEFINE_string(
     "output",
-    "/mnt/data/workspace/datasets/MyRealsense/20240229_desktop_0000/predict",
+    "/mnt/data/workspace/datasets/VM3140/predict",
     "output path",
 )
 gflags.DEFINE_boolean(
