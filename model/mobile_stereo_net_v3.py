@@ -1,6 +1,7 @@
 # MobileStereoNetV2 implementation based on: https://github.com/zjjMaiMai/TinyHITNet
 
 import math
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,9 +14,9 @@ def make_cost_volume(left, right, max_disp):
     # cost_volume: 1 x 32 x 24 x 60 x 80
     n, c, h, w = left.shape
 
-    cost_volume = torch.ones(size=[n, c, max_disp, h, w],
-                             dtype=left.dtype,
-                             device=left.device)
+    cost_volume = torch.ones(
+        size=[n, c, max_disp, h, w], dtype=left.dtype, device=left.device
+    )
 
     # for any disparity d:
     #   cost_volume[:, :, d, :, :d] = 1.0
@@ -29,12 +30,12 @@ def make_cost_volume(left, right, max_disp):
 
 
 def make_groupwise_cost_volume(left, right, max_disp, n_groups=16):
-
     def groupwise(x, y, n_groups):
         n, c, h, w = left.shape
 
-        assert (c % n_groups == 0), \
-            f"groupwise cost channel ({c}) % #groups ({n_groups}) != 0."
+        assert (
+            c % n_groups == 0
+        ), f"groupwise cost channel ({c}) % #groups ({n_groups}) != 0."
 
         cost = (x * y).view([n, n_groups, c // n_groups, h, w]).mean(dim=2)
         return cost
@@ -46,15 +47,16 @@ def make_groupwise_cost_volume(left, right, max_disp, n_groups=16):
     # cost_volume: 1 x 16 x 24 x 60 x 80
     n, c, h, w = left.shape
 
-    volume = torch.zeros([n, n_groups, max_disp, h, w],
-                         dtype=left.dtype,
-                         device=left.device)
+    volume = torch.zeros(
+        [n, n_groups, max_disp, h, w], dtype=left.dtype, device=left.device
+    )
     for d in range(max_disp):
         if d == 0:
             volume[:, :, d, :, :] = groupwise(left, right, n_groups)
         else:
-            volume[:, :, d, :, d:] = \
-                groupwise(left[:, :, :, d:], right[:, :, :, :-d], n_groups)
+            volume[:, :, d, :, d:] = groupwise(
+                left[:, :, :, d:], right[:, :, :, :-d], n_groups
+            )
 
         volume = volume.contiguous()
         return volume
@@ -76,8 +78,53 @@ def conv_1x1(in_c, out_c):
     )
 
 
-class ResBlock(nn.Module):
+class Difference3DCostVolume(nn.Module):
+    def __init__(self, hidden_dim, max_disp, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
 
+        self.hidden_dim = hidden_dim
+        self.max_disp = max_disp
+
+        self.l_kernels = self.get_conv2d_kernels(reverse=False)
+        self.r_kernels = self.get_conv2d_kernels(reverse=True)
+
+    def get_conv2d_kernels(self, reverse=True):
+        kernels = []
+        for i in range(1, self.max_disp):
+            kernel = np.zeros(shape=[self.hidden_dim, 1, 1, i + 1], dtype=np.float32)
+            kernel[:, 0, 0, (0 if reverse else -1)] = 1.0
+            kernel = torch.tensor(kernel, dtype=torch.float32)
+
+            kernels.append(kernel)
+        return kernels
+
+    def forward(self, l_fmap, r_fmap):
+        cost_volume = []
+        for d in range(self.max_disp):
+            if d == 0:
+                cost_volume.append((l_fmap - r_fmap).unsqueeze(2))
+            else:
+                x = F.conv2d(
+                    l_fmap,
+                    self.l_kernels[d - 1].to(l_fmap.device),
+                    stride=1,
+                    padding=0,
+                    groups=self.hidden_dim,
+                )
+                y = F.conv2d(
+                    r_fmap,
+                    self.r_kernels[d - 1].to(r_fmap.device),
+                    stride=1,
+                    padding=0,
+                    groups=self.hidden_dim,
+                )
+
+                cost_volume.append(F.pad(x - y, [d, 0, 0, 0], value=1.0).unsqueeze(2))
+        cost_volume = torch.concat(cost_volume, dim=2)
+        return cost_volume
+
+
+class ResBlock(nn.Module):
     def __init__(self, c0, dilation=1):
         super().__init__()
         self.conv = nn.Sequential(
@@ -115,8 +162,7 @@ def warp_by_flow_map(image, flow):
     grid_x = grid_x.permute([0, 2, 3, 1])
 
     if c == 2:
-        grid_y = grid_y.view([1, 1, h, w]) - flow[:, 1, :, :].view(
-            [n, 1, h, w])
+        grid_y = grid_y.view([1, 1, h, w]) - flow[:, 1, :, :].view([n, 1, h, w])
         grid_y = grid_y.permute([0, 2, 3, 1])
     else:
         grid_y = grid_y.view([1, h, w, 1]).repeat(n, 1, 1, 1)
@@ -125,16 +171,13 @@ def warp_by_flow_map(image, flow):
     grid_y = 2.0 * grid_y / (h - 1.0) - 1.0
     grid_map = torch.concatenate((grid_x, grid_y), dim=-1)
 
-    warped = F.grid_sample(image,
-                           grid_map,
-                           mode="bilinear",
-                           padding_mode="zeros",
-                           align_corners=True)
+    warped = F.grid_sample(
+        image, grid_map, mode="bilinear", padding_mode="zeros", align_corners=True
+    )
     return warped
 
 
 class RefineNet(nn.Module):
-
     def __init__(self, in_dim, hidden_dim, refine_dilates):
         super().__init__()
         self.in_dim = in_dim
@@ -152,11 +195,12 @@ class RefineNet(nn.Module):
         # r_fmap: 1 x 32 x 120 x 160
 
         # disp: 1 x 1 x 120 x 160
-        disp = (F.interpolate(
-            disp, scale_factor=2, mode="bilinear", align_corners=False) * 2)
+        disp = (
+            F.interpolate(disp, scale_factor=2, mode="bilinear", align_corners=False)
+            * 2
+        )
         # rgb: 1 x 3 x 120 x 160
-        if l_fmap.shape[2:] != disp.shape[2:] or r_fmap.shape[
-                2:] != disp.shape[2:]:
+        if l_fmap.shape[2:] != disp.shape[2:] or r_fmap.shape[2:] != disp.shape[2:]:
             l_fmap = F.interpolate(
                 l_fmap,
                 (disp.size(2), disp.size(3)),
@@ -196,7 +240,6 @@ def same_padding_conv(x, w, b, s):
 
 
 class SameConv2d(nn.Conv2d):
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -205,7 +248,6 @@ class SameConv2d(nn.Conv2d):
 
 
 class UpsampleBlock(nn.Module):
-
     def __init__(self, c0, c1):
         super().__init__()
         self.up_conv = nn.Sequential(
@@ -229,7 +271,6 @@ class UpsampleBlock(nn.Module):
 
 
 class UNetFeatureExtractor(nn.Module):
-
     def __init__(self, hidden_dims):
         super().__init__()
 
@@ -246,26 +287,20 @@ class UNetFeatureExtractor(nn.Module):
                 )
             elif i > 0 and i < self.down_factor:
                 layer = nn.Sequential(
-                    SameConv2d(self.hidden_dims[i - 1], self.hidden_dims[i], 4,
-                               2),
+                    SameConv2d(self.hidden_dims[i - 1], self.hidden_dims[i], 4, 2),
                     nn.LeakyReLU(0.2),
-                    nn.Conv2d(self.hidden_dims[i], self.hidden_dims[i], 3, 1,
-                              1),
+                    nn.Conv2d(self.hidden_dims[i], self.hidden_dims[i], 3, 1, 1),
                     nn.LeakyReLU(0.2),
                 )
             elif i == self.down_factor:
                 layer = nn.Sequential(
-                    SameConv2d(self.hidden_dims[i - 1], self.hidden_dims[i], 4,
-                               2),
+                    SameConv2d(self.hidden_dims[i - 1], self.hidden_dims[i], 4, 2),
                     nn.LeakyReLU(0.2),
-                    nn.Conv2d(self.hidden_dims[i], self.hidden_dims[i], 3, 1,
-                              1),
+                    nn.Conv2d(self.hidden_dims[i], self.hidden_dims[i], 3, 1, 1),
                     nn.LeakyReLU(0.2),
-                    nn.Conv2d(self.hidden_dims[i], self.hidden_dims[i], 3, 1,
-                              1),
+                    nn.Conv2d(self.hidden_dims[i], self.hidden_dims[i], 3, 1, 1),
                     nn.LeakyReLU(0.2),
-                    nn.Conv2d(self.hidden_dims[i], self.hidden_dims[i], 3, 1,
-                              1),
+                    nn.Conv2d(self.hidden_dims[i], self.hidden_dims[i], 3, 1, 1),
                     nn.LeakyReLU(0.2),
                 )
             self.down_layers.append(layer)
@@ -292,7 +327,6 @@ class UNetFeatureExtractor(nn.Module):
 
 
 class MobileStereoNetV3(nn.Module):
-
     def __init__(
         self,
         down_factor=3,
@@ -314,12 +348,19 @@ class MobileStereoNetV3(nn.Module):
         self.num_groups = num_groups
 
         self.feature_extractor = UNetFeatureExtractor(
-            hidden_dims=[hidden_dim] * (down_factor + 1))
-
+            hidden_dims=[hidden_dim] * (down_factor + 1)
+        )
+        self.cost_volume = Difference3DCostVolume(
+            hidden_dim=self.hidden_dim, max_disp=self.max_disp
+        )
         self.cost_filter = nn.Sequential(
             nn.Conv3d(
-                (self.num_groups if self.use_groupwise_cost else self.hidden_dim),\
-                self.hidden_dim, 3, 1, 1),
+                (self.num_groups if self.use_groupwise_cost else self.hidden_dim),
+                self.hidden_dim,
+                3,
+                1,
+                1,
+            ),
             nn.BatchNorm3d(self.hidden_dim),
             nn.ReLU(),
             nn.Conv3d(self.hidden_dim, self.hidden_dim, 3, 1, 1),
@@ -333,13 +374,16 @@ class MobileStereoNetV3(nn.Module):
             nn.ReLU(),
             nn.Conv3d(self.hidden_dim, 1, 3, 1, 1),
         )
-        self.refine_layers = nn.ModuleList([
-            RefineNet(
-                in_dim=1 + 2 * hidden_dim,
-                hidden_dim=self.hidden_dim,
-                refine_dilates=self.refine_dilates,
-            ) for _ in range(self.down_factor)
-        ])
+        self.refine_layers = nn.ModuleList(
+            [
+                RefineNet(
+                    in_dim=1 + 2 * hidden_dim,
+                    hidden_dim=self.hidden_dim,
+                    refine_dilates=self.refine_dilates,
+                )
+                for _ in range(self.down_factor)
+            ]
+        )
 
     def forward(self, l_img, r_img):
         # l_fmaps:
@@ -352,8 +396,13 @@ class MobileStereoNetV3(nn.Module):
 
         # max_disp: 192 // 8 = 24
         # cost_volume: 1 x 32 x 24 x 60 x 80
-        cost_volume = make_groupwise_cost_volume(l_fmaps[0], r_fmaps[0], self.max_disp, self.num_groups) \
-            if self.use_groupwise_cost else make_cost_volume(l_fmaps[0], r_fmaps[0], self.max_disp)
+        cost_volume = (
+            make_groupwise_cost_volume(
+                l_fmaps[0], r_fmaps[0], self.max_disp, self.num_groups
+            )
+            if self.use_groupwise_cost
+            else self.cost_volume(l_fmaps[0], r_fmaps[0])
+        )
         # cost_volume: 1 x 24 x 60 x 80
         cost_volume = self.cost_filter(cost_volume).squeeze(1)
 
