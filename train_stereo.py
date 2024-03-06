@@ -11,6 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 from model import build_model
 from loss import build_loss_function
 from loss.loss import get_flow_map_metrics
@@ -176,14 +177,25 @@ def train(exp_config):
 
             valid = valid.unsqueeze(1)
 
-            padder = InputPadder(image1.shape, divis_by=64)
-            image1, image2 = padder.pad(image1, image2)
+            image1 = 2.0 * (image1 / 255.0) - 1.0
+            image2 = 2.0 * (image2 / 255.0) - 1.0
+
+            n, c, src_h, src_w = image1.shape
+
+            align = 2 ** 4
+            w_pad = (align - (src_w % align)) % align
+            h_pad = (align - (src_h % align)) % align
+
+            # l_img: 1 x 3 x 480 x 640
+            image1 = F.pad(image1, (0, w_pad, 0, h_pad))
+            image2 = F.pad(image2, (0, w_pad, 0, h_pad))
+
+            flow = F.pad(flow, (0, w_pad, 0, h_pad))
+            valid = F.pad(valid, (0, w_pad, 0, h_pad))
 
             assert model.training
             flow_predictions = model(image1, image2)
             assert model.training
-
-            flow_predictions = [padder.unpad(x) for x in flow_predictions]
 
             loss = loss_func(
                 flow,

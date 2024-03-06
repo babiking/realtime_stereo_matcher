@@ -32,7 +32,23 @@
     "model": {
         "type": "MobileStereoNetV4",
         "parameters": {
-            "max_disp": 192
+            "hidden_dims": [
+                16,
+                24,
+                32,
+                48,
+                64
+            ],
+            "up_factor": 2,
+            "max_disp": 192,
+            "filter_dim": 32,
+            "refine_dim": 32,
+            "refine_dilates": [
+                1,
+                2,
+                4,
+                8
+            ]
         }
     },
     "data": {

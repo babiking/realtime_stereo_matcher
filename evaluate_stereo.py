@@ -17,7 +17,7 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/stereo_net_config_v3_finetune.json",
+    "configure/stereo_net_config_v4.json",
     "experiment configure json file",
 )
 gflags.DEFINE_string(
@@ -460,14 +460,14 @@ def main():
     del sample
     torch.cuda.empty_cache()
 
-    if "train" in exp_config:
-        logging.info(f"Loading checkpoint: {FLAGS.model_chkpt_file}...")
-        checkpoint = torch.load(FLAGS.model_chkpt_file)
-        try:
-            model.load_state_dict(checkpoint, strict=True)
-        except:
-            model.load_state_dict(checkpoint["model"], strict=True)
-        logging.info(f"Done loading checkpoint.")
+    # if "train" in exp_config:
+    #     logging.info(f"Loading checkpoint: {FLAGS.model_chkpt_file}...")
+    #     checkpoint = torch.load(FLAGS.model_chkpt_file)
+    #     try:
+    #         model.load_state_dict(checkpoint, strict=True)
+    #     except:
+    #         model.load_state_dict(checkpoint["model"], strict=True)
+    #     logging.info(f"Done loading checkpoint.")
 
         # print(
         #     f"The model has {format(count_parameters(model)/1e6, '.4f')}M learnable parameters."

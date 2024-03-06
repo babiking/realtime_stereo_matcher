@@ -1,524 +1,282 @@
-# MobileStereoNetV4 based on https://github.com/cogsys-tuebingen/mobilestereonet
+# MobileStereoNetV2 implementation based on: https://github.com/zjjMaiMai/TinyHITNet
 
-from __future__ import print_function
 import math
+import torch
 import torch.nn as nn
-import torch.utils.data
 import torch.nn.functional as F
 
 
-def disparity_regression(x, maxdisp):
-    assert len(x.shape) == 4
-    disp_values = torch.arange(0, maxdisp, dtype=x.dtype, device=x.device)
-    disp_values = disp_values.view(1, maxdisp, 1, 1)
-    return torch.sum(x * disp_values, 1, keepdim=False)
+def make_cost_volume(left, right, max_disp):
+    # left: 1 x 32 x 60 x 80
+    # right: 1 x 32 x 60 x 80
+    # max_disp: 24
+    # cost_volume: 1 x 32 x 24 x 60 x 80
+    n, c, h, w = left.shape
+
+    cost_volume = torch.ones(
+        size=[n, c, max_disp, h, w], dtype=left.dtype, device=left.device
+    )
+
+    # for any disparity d:
+    #   cost_volume[:, :, d, :, :d] = 1.0
+    #   cost_volume[:, :, d, :, d:] = left[:, :, :, d:] - right[:, :, :, :-d]
+    cost_volume[:, :, 0, :, :] = left - right
+    for d in range(1, max_disp):
+        cost_volume[:, :, d, :, d:] = left[:, :, :, d:] - right[:, :, :, :-d]
+
+    # cost_volume: 1 x 32 x 24 x 60 x 80
+    return cost_volume
 
 
-def interweave_tensors(refimg_fea, targetimg_fea):
-    B, C, H, W = refimg_fea.shape
-    interwoven_features = refimg_fea.new_zeros([B, 2 * C, H, W])
-    interwoven_features[:, ::2, :, :] = refimg_fea
-    interwoven_features[:, 1::2, :, :] = targetimg_fea
-    interwoven_features = interwoven_features.contiguous()
-    return interwoven_features
-
-
-def convbn_dws(inp, oup, kernel_size, stride, pad, dilation, second_relu=True):
-    if second_relu:
-        return nn.Sequential(
-            # dw
-            nn.Conv2d(
-                inp,
-                inp,
-                kernel_size=kernel_size,
-                stride=stride,
-                padding=dilation if dilation > 1 else pad,
-                dilation=dilation,
-                groups=inp,
-                bias=False,
-            ),
-            nn.BatchNorm2d(inp),
-            nn.ReLU6(inplace=True),
-            # pw
-            nn.Conv2d(inp, oup, 1, 1, 0, bias=False),
-            nn.BatchNorm2d(oup),
-            nn.ReLU6(inplace=False),
-        )
-    else:
-        return nn.Sequential(
-            # dw
-            nn.Conv2d(
-                inp,
-                inp,
-                kernel_size=kernel_size,
-                stride=stride,
-                padding=dilation if dilation > 1 else pad,
-                dilation=dilation,
-                groups=inp,
-                bias=False,
-            ),
-            nn.BatchNorm2d(inp),
-            nn.ReLU6(inplace=True),
-            # pw
-            nn.Conv2d(inp, oup, 1, 1, 0, bias=False),
-            nn.BatchNorm2d(oup),
-        )
-
-
-class MobileV1_Residual(nn.Module):
-    expansion = 1
-
-    def __init__(self, inplanes, planes, stride, downsample, pad, dilation):
-        super(MobileV1_Residual, self).__init__()
-
-        self.stride = stride
-        self.downsample = downsample
-        self.conv1 = convbn_dws(inplanes, planes, 3, stride, pad, dilation)
-        self.conv2 = convbn_dws(planes, planes, 3, 1, pad, dilation, second_relu=False)
-
-    def forward(self, x):
-        out = self.conv1(x)
-        out = self.conv2(out)
-
-        if self.downsample is not None:
-            x = self.downsample(x)
-
-        out += x
-
-        return out
-
-
-class MobileV2_Residual(nn.Module):
-    def __init__(self, inp, oup, stride, expanse_ratio, dilation=1):
-        super(MobileV2_Residual, self).__init__()
-        self.stride = stride
-        assert stride in [1, 2]
-
-        hidden_dim = int(inp * expanse_ratio)
-        self.use_res_connect = self.stride == 1 and inp == oup
-        pad = dilation
-
-        if expanse_ratio == 1:
-            self.conv = nn.Sequential(
-                # dw
-                nn.Conv2d(
-                    hidden_dim,
-                    hidden_dim,
-                    3,
-                    stride,
-                    pad,
-                    dilation=dilation,
-                    groups=hidden_dim,
-                    bias=False,
-                ),
-                nn.BatchNorm2d(hidden_dim),
-                nn.ReLU6(inplace=True),
-                # pw-linear
-                nn.Conv2d(hidden_dim, oup, 1, 1, 0, bias=False),
-                nn.BatchNorm2d(oup),
-            )
-        else:
-            self.conv = nn.Sequential(
-                # pw
-                nn.Conv2d(inp, hidden_dim, 1, 1, 0, bias=False),
-                nn.BatchNorm2d(hidden_dim),
-                nn.ReLU6(inplace=True),
-                # dw
-                nn.Conv2d(
-                    hidden_dim,
-                    hidden_dim,
-                    3,
-                    stride,
-                    pad,
-                    dilation=dilation,
-                    groups=hidden_dim,
-                    bias=False,
-                ),
-                nn.BatchNorm2d(hidden_dim),
-                nn.ReLU6(inplace=True),
-                # pw-linear
-                nn.Conv2d(hidden_dim, oup, 1, 1, 0, bias=False),
-                nn.BatchNorm2d(oup),
-            )
-
-    def forward(self, x):
-        if self.use_res_connect:
-            return x + self.conv(x)
-        else:
-            return self.conv(x)
-
-
-class feature_extraction(nn.Module):
-    def __init__(self, add_relus=False):
-        super(feature_extraction, self).__init__()
-
-        self.expanse_ratio = 3
-        self.inplanes = 32
-        if add_relus:
-            self.firstconv = nn.Sequential(
-                MobileV2_Residual(3, 32, 2, self.expanse_ratio),
-                nn.ReLU(inplace=True),
-                MobileV2_Residual(32, 32, 1, self.expanse_ratio),
-                nn.ReLU(inplace=True),
-                MobileV2_Residual(32, 32, 1, self.expanse_ratio),
-                nn.ReLU(inplace=True),
-            )
-        else:
-            self.firstconv = nn.Sequential(
-                MobileV2_Residual(3, 32, 2, self.expanse_ratio),
-                MobileV2_Residual(32, 32, 1, self.expanse_ratio),
-                MobileV2_Residual(32, 32, 1, self.expanse_ratio),
-            )
-
-        self.layer1 = self._make_layer(MobileV1_Residual, 32, 3, 1, 1, 1)
-        self.layer2 = self._make_layer(MobileV1_Residual, 64, 16, 2, 1, 1)
-        self.layer3 = self._make_layer(MobileV1_Residual, 128, 3, 1, 1, 1)
-        self.layer4 = self._make_layer(MobileV1_Residual, 128, 3, 1, 1, 2)
-
-    def _make_layer(self, block, planes, blocks, stride, pad, dilation):
-        downsample = None
-
-        if stride != 1 or self.inplanes != planes:
-            downsample = nn.Sequential(
-                nn.Conv2d(
-                    self.inplanes, planes, kernel_size=1, stride=stride, bias=False
-                ),
-                nn.BatchNorm2d(planes),
-            )
-
-        layers = [block(self.inplanes, planes, stride, downsample, pad, dilation)]
-        self.inplanes = planes
-        for i in range(1, blocks):
-            layers.append(block(self.inplanes, planes, 1, None, pad, dilation))
-
-        return nn.Sequential(*layers)
-
-    def forward(self, x):
-        x = self.firstconv(x)
-        x = self.layer1(x)
-        l2 = self.layer2(x)
-        l3 = self.layer3(l2)
-        l4 = self.layer4(l3)
-
-        feature_volume = torch.cat((l2, l3, l4), dim=1)
-
-        return feature_volume
-
-
-def convbn(in_channels, out_channels, kernel_size, stride, pad, dilation):
+def conv_3x3(in_c, out_c, s=1, d=1):
     return nn.Sequential(
-        nn.Conv2d(
-            in_channels,
-            out_channels,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=dilation if dilation > 1 else pad,
-            dilation=dilation,
-            bias=False,
-        ),
-        nn.BatchNorm2d(out_channels),
+        nn.Conv2d(in_c, out_c, 3, s, d, dilation=d, bias=False),
+        nn.BatchNorm2d(out_c),
+        nn.ReLU(),
     )
 
 
-class hourglass2D(nn.Module):
-    def __init__(self, in_channels):
-        super(hourglass2D, self).__init__()
+def conv_1x1(in_c, out_c):
+    return nn.Sequential(
+        nn.Conv2d(in_c, out_c, 1, bias=False),
+        nn.BatchNorm2d(out_c),
+        nn.ReLU(),
+    )
 
-        self.expanse_ratio = 2
 
-        self.conv1 = MobileV2_Residual(
-            in_channels, in_channels * 2, stride=2, expanse_ratio=self.expanse_ratio
+class ResBlock(nn.Module):
+    def __init__(self, c0, dilation=1):
+        super().__init__()
+        self.conv = nn.Sequential(
+            conv_3x3(c0, c0, d=dilation),
+            conv_3x3(c0, c0, d=dilation),
         )
 
-        self.conv2 = MobileV2_Residual(
-            in_channels * 2, in_channels * 2, stride=1, expanse_ratio=self.expanse_ratio
+    def forward(self, input):
+        x = self.conv(input)
+        return x + input
+
+
+class RefineNet(nn.Module):
+    def __init__(self, in_dim, hidden_dim, refine_dilates):
+        super().__init__()
+        self.in_dim = in_dim
+        self.hidden_dim = hidden_dim
+        self.refine_dilates = refine_dilates
+        self.conv0 = nn.Sequential(
+            conv_3x3(self.in_dim, self.hidden_dim),
+            *[ResBlock(self.hidden_dim, d) for d in refine_dilates],
+            nn.Conv2d(self.hidden_dim, 1, 3, 1, 1),
         )
 
-        self.conv3 = MobileV2_Residual(
-            in_channels * 2, in_channels * 4, stride=2, expanse_ratio=self.expanse_ratio
+    def forward(self, disp, l_fmap):
+        # disp: 1 x 1 x 60 x 80
+        # l_fmap: 1 x 32 x 120 x 160
+        # r_fmap: 1 x 32 x 120 x 160
+
+        # disp: 1 x 1 x 120 x 160
+        disp = F.interpolate(
+            disp * 2.0, scale_factor=2, mode="bilinear", align_corners=False
         )
 
-        self.conv4 = MobileV2_Residual(
-            in_channels * 4, in_channels * 4, stride=1, expanse_ratio=self.expanse_ratio
-        )
+        # x: 1 x (2 * 32 + 1) x 120 x 160
+        x = torch.cat((disp, l_fmap), dim=1)
+        # x: 1 x 1 x 120 x 160
+        x = self.conv0(x)
+        # x: 1 x 1 x 120 x 160, x >= 0.0
+        return F.relu(disp + x)
 
-        self.conv5 = nn.Sequential(
-            nn.ConvTranspose2d(
-                in_channels * 4,
-                in_channels * 2,
-                3,
-                padding=1,
-                output_padding=1,
-                stride=2,
-                bias=False,
-            ),
-            nn.BatchNorm2d(in_channels * 2),
-        )
 
-        self.conv6 = nn.Sequential(
-            nn.ConvTranspose2d(
-                in_channels * 2,
-                in_channels,
-                3,
-                padding=1,
-                output_padding=1,
-                stride=2,
-                bias=False,
-            ),
-            nn.BatchNorm2d(in_channels),
-        )
+def same_padding_conv(x, w, b, s):
+    out_h = math.ceil(x.size(2) / s[0])
+    out_w = math.ceil(x.size(3) / s[1])
 
-        self.redir1 = MobileV2_Residual(
-            in_channels, in_channels, stride=1, expanse_ratio=self.expanse_ratio
-        )
-        self.redir2 = MobileV2_Residual(
-            in_channels * 2, in_channels * 2, stride=1, expanse_ratio=self.expanse_ratio
-        )
+    pad_h = max((out_h - 1) * s[0] + w.size(2) - x.size(2), 0)
+    pad_w = max((out_w - 1) * s[1] + w.size(3) - x.size(3), 0)
+    pad_top = pad_h // 2
+    pad_bottom = pad_h - pad_top
+    pad_left = pad_w // 2
+    pad_right = pad_w - pad_left
+
+    x = F.pad(x, (pad_left, pad_right, pad_top, pad_bottom))
+    x = F.conv2d(x, w, b, stride=s)
+    return x
+
+
+class SameConv2d(nn.Conv2d):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
     def forward(self, x):
-        conv1 = self.conv1(x)
-        conv2 = self.conv2(conv1)
+        return same_padding_conv(x, self.weight, self.bias, self.stride)
 
-        conv3 = self.conv3(conv2)
-        conv4 = self.conv4(conv3)
 
-        conv5 = F.relu(self.conv5(conv4) + self.redir2(conv2), inplace=True)
-        conv6 = F.relu(self.conv6(conv5) + self.redir1(x), inplace=True)
+class UpsampleBlock(nn.Module):
+    def __init__(self, c0, c1):
+        super().__init__()
+        self.up_conv = nn.Sequential(
+            nn.ConvTranspose2d(c0, c1, 2, 2),
+            nn.LeakyReLU(0.2),
+        )
+        self.merge_conv = nn.Sequential(
+            nn.Conv2d(c1 * 2, c1, 1),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(c1, c1, 3, 1, 1),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(c1, c1, 3, 1, 1),
+            nn.LeakyReLU(0.2),
+        )
 
-        return conv6
+    def forward(self, input, sc):
+        x = self.up_conv(input)
+        x = torch.cat((x, sc), dim=1)
+        x = self.merge_conv(x)
+        return x
+
+
+class UNetFeatureExtractor(nn.Module):
+    def __init__(self, hidden_dims, up_factor):
+        super().__init__()
+
+        self.hidden_dims = hidden_dims
+        self.down_factor = len(hidden_dims) - 1
+        self.up_factor = up_factor
+
+        self.down_layers = nn.ModuleList([])
+        self.up_layers = nn.ModuleList([])
+
+        for i in range(self.down_factor + 1):
+            if i == 0:
+                layer = nn.Sequential(
+                    nn.Conv2d(3, self.hidden_dims[0], 3, 1, 1),
+                    nn.LeakyReLU(0.2),
+                )
+            elif i > 0 and i < self.down_factor:
+                layer = nn.Sequential(
+                    SameConv2d(self.hidden_dims[i - 1], self.hidden_dims[i], 4, 2),
+                    nn.LeakyReLU(0.2),
+                    nn.Conv2d(self.hidden_dims[i], self.hidden_dims[i], 3, 1, 1),
+                    nn.LeakyReLU(0.2),
+                )
+            elif i == self.down_factor:
+                layer = nn.Sequential(
+                    SameConv2d(self.hidden_dims[i - 1], self.hidden_dims[i], 4, 2),
+                    nn.LeakyReLU(0.2),
+                    nn.Conv2d(self.hidden_dims[i], self.hidden_dims[i], 3, 1, 1),
+                    nn.LeakyReLU(0.2),
+                    nn.Conv2d(self.hidden_dims[i], self.hidden_dims[i], 3, 1, 1),
+                    nn.LeakyReLU(0.2),
+                    nn.Conv2d(self.hidden_dims[i], self.hidden_dims[i], 3, 1, 1),
+                    nn.LeakyReLU(0.2),
+                )
+            self.down_layers.append(layer)
+
+        for i in range(self.up_factor):
+            j = self.down_factor - i
+
+            layer = UpsampleBlock(self.hidden_dims[j], self.hidden_dims[j - 1])
+            self.up_layers.append(layer)
+
+    def forward(self, x):
+        down_pyramid = []
+        for i, down_layer in enumerate(self.down_layers):
+            x = down_layer(x)
+            down_pyramid.append(x)
+
+        up_pyramid = []
+        for i, up_layer in enumerate(self.up_layers):
+            j = self.down_factor - i
+
+            y = up_layer(
+                up_pyramid[i - 1] if i > 0 else down_pyramid[-1], down_pyramid[j - 1]
+            )
+            up_pyramid.append(y)
+        return up_pyramid
 
 
 class MobileStereoNetV4(nn.Module):
-    def __init__(self, max_disp):
-        super(MobileStereoNetV4, self).__init__()
-
-        self.maxdisp = max_disp
-
-        self.num_groups = 1
-
-        self.volume_size = 48
-
-        self.hg_size = 48
-
-        self.dres_expanse_ratio = 3
-
-        self.feature_extraction = feature_extraction(add_relus=True)
-
-        self.preconv11 = nn.Sequential(
-            convbn(320, 256, 1, 1, 0, 1),
-            nn.ReLU(inplace=True),
-            convbn(256, 128, 1, 1, 0, 1),
-            nn.ReLU(inplace=True),
-            convbn(128, 64, 1, 1, 0, 1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(64, 32, 1, 1, 0, 1),
+    def __init__(
+        self,
+        hidden_dims=[16, 24, 32, 48, 64],
+        up_factor=2,
+        max_disp=192,
+        filter_dim=32,
+        refine_dim=32,
+        refine_dilates=[1, 2, 4, 8],
+    ):
+        super().__init__()
+        self.hidden_dims = hidden_dims
+        self.down_factor = len(hidden_dims) - 1
+        self.up_factor = up_factor
+        self.max_disp = (max_disp + 1) // (2 ** (self.down_factor - 1))
+        self.filter_dim = filter_dim
+        self.refine_dim = refine_dim
+        self.refine_dilates = refine_dilates
+        self.feature_extractor = UNetFeatureExtractor(
+            hidden_dims=hidden_dims, up_factor=up_factor
         )
 
-        self.conv3d = nn.Sequential(
-            nn.Conv3d(
-                1, 16, kernel_size=(8, 3, 3), stride=[8, 1, 1], padding=[0, 1, 1]
-            ),
-            nn.BatchNorm3d(16),
+        self.cost_filter = nn.Sequential(
+            nn.Conv3d(self.hidden_dims[self.down_factor - 1], self.filter_dim, 3, 1, 1),
+            nn.BatchNorm3d(self.filter_dim),
             nn.ReLU(),
-            nn.Conv3d(
-                16, 32, kernel_size=(4, 3, 3), stride=[4, 1, 1], padding=[0, 1, 1]
-            ),
-            nn.BatchNorm3d(32),
+            nn.Conv3d(self.filter_dim, self.filter_dim, 3, 1, 1),
+            nn.BatchNorm3d(self.filter_dim),
             nn.ReLU(),
-            nn.Conv3d(
-                32, 16, kernel_size=(2, 3, 3), stride=[2, 1, 1], padding=[0, 1, 1]
-            ),
-            nn.BatchNorm3d(16),
+            nn.Conv3d(self.filter_dim, self.filter_dim, 3, 1, 1),
+            nn.BatchNorm3d(self.filter_dim),
             nn.ReLU(),
+            nn.Conv3d(self.filter_dim, 1, 3, 1, 1),
         )
-
-        self.volume11 = nn.Sequential(convbn(16, 1, 1, 1, 0, 1), nn.ReLU(inplace=True))
-
-        self.dres0 = nn.Sequential(
-            MobileV2_Residual(
-                self.volume_size, self.hg_size, 1, self.dres_expanse_ratio
-            ),
-            nn.ReLU(inplace=True),
-            MobileV2_Residual(self.hg_size, self.hg_size, 1, self.dres_expanse_ratio),
-            nn.ReLU(inplace=True),
-        )
-
-        self.dres1 = nn.Sequential(
-            MobileV2_Residual(self.hg_size, self.hg_size, 1, self.dres_expanse_ratio),
-            nn.ReLU(inplace=True),
-            MobileV2_Residual(self.hg_size, self.hg_size, 1, self.dres_expanse_ratio),
-        )
-
-        self.encoder_decoder1 = hourglass2D(self.hg_size)
-
-        self.encoder_decoder2 = hourglass2D(self.hg_size)
-
-        self.encoder_decoder3 = hourglass2D(self.hg_size)
-
-        self.classif0 = nn.Sequential(
-            convbn(self.hg_size, self.hg_size, 3, 1, 1, 1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(
-                self.hg_size,
-                self.hg_size,
-                kernel_size=3,
-                padding=1,
-                stride=1,
-                bias=False,
-                dilation=1,
-            ),
-        )
-        self.classif1 = nn.Sequential(
-            convbn(self.hg_size, self.hg_size, 3, 1, 1, 1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(
-                self.hg_size,
-                self.hg_size,
-                kernel_size=3,
-                padding=1,
-                stride=1,
-                bias=False,
-                dilation=1,
-            ),
-        )
-        self.classif2 = nn.Sequential(
-            convbn(self.hg_size, self.hg_size, 3, 1, 1, 1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(
-                self.hg_size,
-                self.hg_size,
-                kernel_size=3,
-                padding=1,
-                stride=1,
-                bias=False,
-                dilation=1,
-            ),
-        )
-        self.classif3 = nn.Sequential(
-            convbn(self.hg_size, self.hg_size, 3, 1, 1, 1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(
-                self.hg_size,
-                self.hg_size,
-                kernel_size=3,
-                padding=1,
-                stride=1,
-                bias=False,
-                dilation=1,
-            ),
-        )
-
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-                m.weight.data.normal_(0, math.sqrt(2.0 / n))
-            elif isinstance(m, nn.Conv3d):
-                n = (
-                    m.kernel_size[0]
-                    * m.kernel_size[1]
-                    * m.kernel_size[2]
-                    * m.out_channels
+        self.refine_layers = nn.ModuleList(
+            [
+                RefineNet(
+                    in_dim=1 + self.hidden_dims[self.down_factor - 2 - i],
+                    hidden_dim=self.refine_dim,
+                    refine_dilates=self.refine_dilates,
                 )
-                m.weight.data.normal_(0, math.sqrt(2.0 / n))
-            elif isinstance(m, nn.BatchNorm2d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
-            elif isinstance(m, nn.BatchNorm3d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
-            elif isinstance(m, nn.Linear):
-                m.bias.data.zero_()
+                for i in range(self.up_factor - 1)
+            ]
+        )
 
-    def forward(self, L, R):
-        L = (2.0 * (L / 255.0) - 1.0).contiguous()
-        R = (2.0 * (R / 255.0) - 1.0).contiguous()
+    def forward(self, l_img, r_img, is_train=True):
+        # l_fmaps:
+        #   [1] 1 x 32 x 60 x 80, i.e. 8x downsample
+        #   [2] 1 x 32 x 120 x 160
+        #   [3] 1 x 32 x 240 x 320
+        #   [4] 1 x 32 x 480 x 640
+        l_fmaps = self.feature_extractor(l_img)
+        r_fmaps = self.feature_extractor(r_img)
 
-        features_L = self.feature_extraction(L)
-        features_R = self.feature_extraction(R)
+        # max_disp: 192 // 8 = 24
+        # cost_volume: 1 x 32 x 24 x 60 x 80
+        cost_volume = make_cost_volume(l_fmaps[0], r_fmaps[0], self.max_disp)
+        # cost_volume: 1 x 24 x 60 x 80
+        cost_volume = self.cost_filter(cost_volume).squeeze(1)
 
-        featL = self.preconv11(features_L)
-        featR = self.preconv11(features_R)
+        x = F.softmax(cost_volume, dim=1)
+        d = torch.arange(0, self.max_disp, device=x.device, dtype=x.dtype)
+        # x: 1 x 1 x 60 x 80
+        x = torch.sum(x * d.view(1, -1, 1, 1), dim=1, keepdim=True)
 
-        B, C, H, W = featL.shape
-        volume = featL.new_zeros([B, self.num_groups, self.volume_size, H, W])
-        for i in range(self.volume_size):
-            if i > 0:
-                x = interweave_tensors(featL[:, :, :, i:], featR[:, :, :, :-i])
-                x = torch.unsqueeze(x, 1)
-                x = self.conv3d(x)
-                x = torch.squeeze(x, 2)
-                x = self.volume11(x)
-                volume[:, :, i, :, i:] = x
-            else:
-                x = interweave_tensors(featL, featR)
-                x = torch.unsqueeze(x, 1)
-                x = self.conv3d(x)
-                x = torch.squeeze(x, 2)
-                x = self.volume11(x)
-                volume[:, :, i, :, :] = x
+        multi_scale = []
+        for i, refine in enumerate(self.refine_layers):
+            # x: 1 x 1 x 60 x 80
+            # l_fmaps[i + 1]: 1 x 32 x 120 x 160
+            x = refine(x, l_fmaps[i + 1])
+            # full_res: 1 x 1 x 480 x 640
 
-        volume = volume.contiguous()
-        volume = torch.squeeze(volume, 1)
+            if (not is_train) and (i != len(self.refine_layers) - 1):
+                continue
 
-        cost0 = self.dres0(volume)
-        cost0 = self.dres1(cost0) + cost0
+            multi_scale.append(x)
 
-        out1 = self.encoder_decoder1(cost0)  # [2, hg_size, 64, 128]
-        out2 = self.encoder_decoder2(out1)
-        out3 = self.encoder_decoder3(out2)
-
-        if self.training:
-            cost0 = self.classif0(cost0)
-            cost1 = self.classif1(out1)
-            cost2 = self.classif2(out2)
-            cost3 = self.classif3(out3)
-
-            cost0 = torch.unsqueeze(cost0, 1)
-            cost0 = F.interpolate(
-                cost0, [self.maxdisp, L.size()[2], L.size()[3]], mode="trilinear"
+        multi_scale.append(
+            F.interpolate(
+                multi_scale[-1] * 4.0,
+                scale_factor=4,
+                mode="bilinear",
+                align_corners=False,
             )
-            cost0 = torch.squeeze(cost0, 1)
-            pred0 = F.softmax(cost0, dim=1)
-            pred0 = disparity_regression(pred0, self.maxdisp)
-
-            cost1 = torch.unsqueeze(cost1, 1)
-            cost1 = F.interpolate(
-                cost1, [self.maxdisp, L.size()[2], L.size()[3]], mode="trilinear"
-            )
-            cost1 = torch.squeeze(cost1, 1)
-            pred1 = F.softmax(cost1, dim=1)
-            pred1 = disparity_regression(pred1, self.maxdisp)
-
-            cost2 = torch.unsqueeze(cost2, 1)
-            cost2 = F.interpolate(
-                cost2, [self.maxdisp, L.size()[2], L.size()[3]], mode="trilinear"
-            )
-            cost2 = torch.squeeze(cost2, 1)
-            pred2 = F.softmax(cost2, dim=1)
-            pred2 = disparity_regression(pred2, self.maxdisp)
-
-            cost3 = torch.unsqueeze(cost3, 1)
-            cost3 = F.interpolate(
-                cost3, [self.maxdisp, L.size()[2], L.size()[3]], mode="trilinear"
-            )
-            cost3 = torch.squeeze(cost3, 1)
-            pred3 = F.softmax(cost3, dim=1)
-            pred3 = disparity_regression(pred3, self.maxdisp)
-
-            disp_preds = [pred0, pred1, pred2, pred3]
-
-        else:
-            cost3 = self.classif3(out3)
-            cost3 = torch.unsqueeze(cost3, 1)
-            cost3 = F.interpolate(
-                cost3, [self.maxdisp, L.size()[2], L.size()[3]], mode="trilinear"
-            )
-            cost3 = torch.squeeze(cost3, 1)
-            pred3 = F.softmax(cost3, dim=1)
-            pred3 = disparity_regression(pred3, self.maxdisp)
-
-            disp_preds = [pred3]
-        
-        disp_preds = [disp.unsqueeze(1) for disp in disp_preds]
-
-        return disp_preds
+        )
+        return multi_scale
