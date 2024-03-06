@@ -1,31 +1,10 @@
 # MobileStereoNetV2 implementation based on: https://github.com/zjjMaiMai/TinyHITNet
 
 import math
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-
-def make_cost_volume(left, right, max_disp):
-    # left: 1 x 32 x 60 x 80
-    # right: 1 x 32 x 60 x 80
-    # max_disp: 24
-    # cost_volume: 1 x 32 x 24 x 60 x 80
-    n, c, h, w = left.shape
-
-    cost_volume = torch.ones(
-        size=[n, c, max_disp, h, w], dtype=left.dtype, device=left.device
-    )
-
-    # for any disparity d:
-    #   cost_volume[:, :, d, :, :d] = 1.0
-    #   cost_volume[:, :, d, :, d:] = left[:, :, :, d:] - right[:, :, :, :-d]
-    cost_volume[:, :, 0, :, :] = left - right
-    for d in range(1, max_disp):
-        cost_volume[:, :, d, :, d:] = left[:, :, :, d:] - right[:, :, :, :-d]
-
-    # cost_volume: 1 x 32 x 24 x 60 x 80
-    return cost_volume
 
 
 def conv_3x3(in_c, out_c, s=1, d=1):
@@ -42,6 +21,52 @@ def conv_1x1(in_c, out_c):
         nn.BatchNorm2d(out_c),
         nn.ReLU(),
     )
+
+
+class Difference3DCostVolume(nn.Module):
+    def __init__(self, hidden_dim, max_disp, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        self.hidden_dim = hidden_dim
+        self.max_disp = max_disp
+
+        self.l_kernels = self.get_conv2d_kernels(reverse=False)
+        self.r_kernels = self.get_conv2d_kernels(reverse=True)
+
+    def get_conv2d_kernels(self, reverse=True):
+        kernels = []
+        for i in range(1, self.max_disp):
+            kernel = np.zeros(shape=[self.hidden_dim, 1, 1, i + 1], dtype=np.float32)
+            kernel[:, 0, 0, (0 if reverse else -1)] = 1.0
+            kernel = torch.tensor(kernel, dtype=torch.float32)
+
+            kernels.append(kernel)
+        return kernels
+
+    def forward(self, l_fmap, r_fmap):
+        cost_volume = []
+        for d in range(self.max_disp):
+            if d == 0:
+                cost_volume.append((l_fmap - r_fmap).unsqueeze(2))
+            else:
+                x = F.conv2d(
+                    l_fmap,
+                    self.l_kernels[d - 1].to(l_fmap.device),
+                    stride=1,
+                    padding=0,
+                    groups=self.hidden_dim,
+                )
+                y = F.conv2d(
+                    r_fmap,
+                    self.r_kernels[d - 1].to(r_fmap.device),
+                    stride=1,
+                    padding=0,
+                    groups=self.hidden_dim,
+                )
+
+                cost_volume.append(F.pad(x - y, [d, 0, 0, 0], value=1.0).unsqueeze(2))
+        cost_volume = torch.concat(cost_volume, dim=2)
+        return cost_volume
 
 
 class ResBlock(nn.Module):
@@ -194,6 +219,28 @@ class UNetFeatureExtractor(nn.Module):
         return up_pyramid
 
 
+def make_cost_volume(left, right, max_disp):
+    # left: 1 x 32 x 60 x 80
+    # right: 1 x 32 x 60 x 80
+    # max_disp: 24
+    # cost_volume: 1 x 32 x 24 x 60 x 80
+    n, c, h, w = left.shape
+
+    cost_volume = torch.ones(
+        size=[n, c, max_disp, h, w], dtype=left.dtype, device=left.device
+    )
+
+    # for any disparity d:
+    #   cost_volume[:, :, d, :, :d] = 1.0
+    #   cost_volume[:, :, d, :, d:] = left[:, :, :, d:] - right[:, :, :, :-d]
+    cost_volume[:, :, 0, :, :] = left - right
+    for d in range(1, max_disp):
+        cost_volume[:, :, d, :, d:] = left[:, :, :, d:] - right[:, :, :, :-d]
+
+    # cost_volume: 1 x 32 x 24 x 60 x 80
+    return cost_volume
+
+
 class MobileStereoNetV4(nn.Module):
     def __init__(
         self,
@@ -215,7 +262,9 @@ class MobileStereoNetV4(nn.Module):
         self.feature_extractor = UNetFeatureExtractor(
             hidden_dims=hidden_dims, up_factor=up_factor
         )
-
+        self.cost_volume = Difference3DCostVolume(
+            hidden_dim=self.hidden_dims[self.down_factor - 1], max_disp=self.max_disp
+        )
         self.cost_filter = nn.Sequential(
             nn.Conv3d(self.hidden_dims[self.down_factor - 1], self.filter_dim, 3, 1, 1),
             nn.BatchNorm3d(self.filter_dim),
@@ -250,7 +299,11 @@ class MobileStereoNetV4(nn.Module):
 
         # max_disp: 192 // 8 = 24
         # cost_volume: 1 x 32 x 24 x 60 x 80
-        cost_volume = make_cost_volume(l_fmaps[0], r_fmaps[0], self.max_disp)
+        cost_volume = (
+            make_cost_volume(l_fmaps[0], r_fmaps[0], self.max_disp)
+            if is_train
+            else self.cost_volume(l_fmaps[0], r_fmaps[0])
+        )
         # cost_volume: 1 x 24 x 60 x 80
         cost_volume = self.cost_filter(cost_volume).squeeze(1)
 
@@ -266,14 +319,12 @@ class MobileStereoNetV4(nn.Module):
             x = refine(x, l_fmaps[i + 1])
             # full_res: 1 x 1 x 480 x 640
 
-            if (not is_train) and (i != len(self.refine_layers) - 1):
-                continue
-
-            multi_scale.append(x)
+            if is_train:
+                multi_scale.append(x)
 
         multi_scale.append(
             F.interpolate(
-                multi_scale[-1] * 4.0,
+                x * 4.0,
                 scale_factor=4,
                 mode="bilinear",
                 align_corners=False,
