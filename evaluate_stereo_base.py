@@ -22,7 +22,7 @@ gflags.DEFINE_string(
 )
 gflags.DEFINE_string(
     "model_chkpt_file",
-    "experiments/TRAINER_BASE_V3/checkpoints/TRAINER_BASE_V3-epoch-100000.pth.gz",
+    "experiments/TRAINER_BASE_V3/checkpoints/TRAINER_BASE_V3-epoch-200000.pth.gz",
     "model checkpont file",
 )
 gflags.DEFINE_list(
