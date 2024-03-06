@@ -178,11 +178,12 @@ def warp_by_flow_map(image, flow):
 
 
 class RefineNet(nn.Module):
-    def __init__(self, in_dim, hidden_dim, refine_dilates):
+    def __init__(self, in_dim, hidden_dim, refine_dilates, use_warp_feature):
         super().__init__()
         self.in_dim = in_dim
         self.hidden_dim = hidden_dim
         self.refine_dilates = refine_dilates
+        self.use_warp_feature = use_warp_feature
         self.conv0 = nn.Sequential(
             conv_3x3(self.in_dim, self.hidden_dim),
             *[ResBlock(self.hidden_dim, d) for d in refine_dilates],
@@ -200,23 +201,13 @@ class RefineNet(nn.Module):
             * 2
         )
         # rgb: 1 x 3 x 120 x 160
-        if l_fmap.shape[2:] != disp.shape[2:] or r_fmap.shape[2:] != disp.shape[2:]:
-            l_fmap = F.interpolate(
-                l_fmap,
-                (disp.size(2), disp.size(3)),
-                mode="bilinear",
-                align_corners=False,
-            )
-            r_fmap = F.interpolate(
-                r_fmap,
-                (disp.size(2), disp.size(3)),
-                mode="bilinear",
-                align_corners=False,
-            )
-        r_fmap = warp_by_flow_map(r_fmap, disp)
+        if self.use_warp_feature:
+            r_fmap = warp_by_flow_map(r_fmap, disp)
 
-        # x: 1 x (2 * 32 + 1) x 120 x 160
-        x = torch.cat((disp, l_fmap, r_fmap), dim=1)
+            # x: 1 x (2 * 32 + 1) x 120 x 160
+            x = torch.cat((disp, l_fmap, r_fmap), dim=1)
+        else:
+            x = torch.cat((disp, l_fmap), dim=1)
         # x: 1 x 1 x 120 x 160
         x = self.conv0(x)
         # x: 1 x 1 x 120 x 160, x >= 0.0
@@ -382,6 +373,7 @@ class MobileStereoNetV3(nn.Module):
         use_groupwise_cost=True,
         num_groups=8,
         use_conv2d_cost=True,
+        use_warp_feature=True,
     ):
         super().__init__()
         self.down_factor = down_factor
@@ -395,6 +387,7 @@ class MobileStereoNetV3(nn.Module):
         self.num_groups = num_groups
 
         self.use_conv2d_cost = use_conv2d_cost
+        self.use_warp_feature = use_warp_feature
 
         self.feature_extractor = UNetFeatureExtractor(
             hidden_dims=[hidden_dim] * (down_factor + 1)
@@ -426,9 +419,10 @@ class MobileStereoNetV3(nn.Module):
         self.refine_layers = nn.ModuleList(
             [
                 RefineNet(
-                    in_dim=1 + 2 * hidden_dim,
+                    in_dim=1 + (2 if self.use_warp_feature else 1) * hidden_dim,
                     hidden_dim=self.hidden_dim,
                     refine_dilates=self.refine_dilates,
+                    use_warp_feature=self.use_warp_feature,
                 )
                 for _ in range(self.down_factor)
             ]
