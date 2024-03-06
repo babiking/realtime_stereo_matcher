@@ -92,35 +92,25 @@ class BaseLoss(nn.Module):
         l_flow_loss = 0.0
         for i in range(n_preds):
             l_flow_weight = self.loss_gamma ** (n_preds - 1 - i)
-            l_flow_pred = l_flow_preds[i]
+            l_flow_pred_i = l_flow_preds[i]
 
-            assert not torch.isnan(l_flow_pred).any()
-            assert not torch.isinf(l_flow_pred).any()
+            assert not torch.isnan(l_flow_pred_i).any()
+            assert not torch.isinf(l_flow_pred_i).any()
 
-            if l_flow_gt.shape[-2:] != l_flow_pred.shape[-2:]:
-                scale = float(l_flow_pred.shape[-1]) / l_flow_gt.shape[-1]
-                l_flow_gt_i = F.interpolate(
-                    l_flow_gt * scale,
-                    size=(l_flow_pred.shape[-2:]),
+            if l_flow_gt.shape[-2:] != l_flow_pred_i.shape[-2:]:
+                scale = float(l_flow_gt.shape[-1]) / l_flow_pred_i.shape[-1]
+                l_flow_pred_i = F.interpolate(
+                    l_flow_pred_i * scale,
+                    size=(l_flow_gt.shape[-2:]),
                     mode="bilinear",
                     align_corners=False,
                 )
-                l_flow_valid_i = F.interpolate(
-                    l_flow_valid.float(),
-                    size=(l_flow_pred.shape[-2:]),
-                    mode="bilinear",
-                    align_corners=False,
-                )
-                l_flow_valid_i = l_flow_valid_i >= 0.5
-            else:
-                l_flow_gt_i = l_flow_gt
-                l_flow_valid_i = l_flow_valid
 
             loss_item = self.get_loss_item(
-                i, n_preds, l_flow_gt_i, l_flow_pred, l_fmaps[i], r_fmaps[i]
+                i, n_preds, l_flow_gt, l_flow_pred_i, l_fmaps[i], r_fmaps[i]
             )
 
-            l_flow_loss += l_flow_weight * loss_item[l_flow_valid_i.bool()].mean()
+            l_flow_loss += l_flow_weight * loss_item[l_flow_valid.bool()].mean()
         return l_flow_loss
 
 
