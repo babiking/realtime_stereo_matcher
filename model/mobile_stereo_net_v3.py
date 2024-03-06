@@ -342,17 +342,6 @@ class MobileStereoNetV3(nn.Module):
         ])
 
     def forward(self, l_img, r_img):
-        l_img = (2.0 * (l_img / 255.0) - 1.0).contiguous()
-        r_img = (2.0 * (r_img / 255.0) - 1.0).contiguous()
-
-        n, c, h, w = l_img.size()
-        w_pad = (self.align - (w % self.align)) % self.align
-        h_pad = (self.align - (h % self.align)) % self.align
-
-        # l_img: 1 x 3 x 480 x 640
-        l_img = F.pad(l_img, (0, w_pad, 0, h_pad))
-        r_img = F.pad(r_img, (0, w_pad, 0, h_pad))
-
         # l_fmaps:
         #   [1] 1 x 32 x 60 x 80, i.e. 8x downsample
         #   [2] 1 x 32 x 120 x 160
@@ -378,10 +367,5 @@ class MobileStereoNetV3(nn.Module):
             # x: 1 x 1 x 60 x 80
             # l_fmaps[i + 1]: 1 x 32 x 120 x 160
             x = refine(x, l_fmaps[i + 1], r_fmaps[i + 1])
-            scale = l_img.size(3) / x.size(3)
-            # full_res: 1 x 1 x 480 x 640
-            full_res = F.interpolate(x * scale,
-                                     (l_img.shape[2:]))[:, :, :h, :w]
-            multi_scale.append(full_res)
-
+            multi_scale.append(x)
         return multi_scale

@@ -46,6 +46,9 @@ def validate_realsense(model, mixed_prec=False):
         image1 = image1[None].cuda()
         image2 = image2[None].cuda()
 
+        image1 = 2.0 * (image1 / 255.0) - 1.0
+        image2 = 2.0 * (image2 / 255.0) - 1.0
+
         padder = InputPadder(image1.shape, divis_by=64)
         image1, image2 = padder.pad(image1, image2)
 
@@ -117,6 +120,9 @@ def validate_eth3d(model, mixed_prec=False):
         _, image1, image2, flow_gt, valid_gt = val_dataset[val_id]
         image1 = image1[None].cuda()
         image2 = image2[None].cuda()
+
+        image1 = 2.0 * (image1 / 255.0) - 1.0
+        image2 = 2.0 * (image2 / 255.0) - 1.0
 
         padder = InputPadder(image1.shape, divis_by=64)
         image1, image2 = padder.pad(image1, image2)
@@ -194,6 +200,9 @@ def validate_kitti(model, mixed_prec=False):
         image1 = image1[None].cuda()
         image2 = image2[None].cuda()
 
+        image1 = 2.0 * (image1 / 255.0) - 1.0
+        image2 = 2.0 * (image2 / 255.0) - 1.0
+
         padder = InputPadder(image1.shape, divis_by=64)
         image1, image2 = padder.pad(image1, image2)
 
@@ -270,6 +279,9 @@ def validate_things(model, mixed_prec=False):
         image1 = image1[None].cuda()
         image2 = image2[None].cuda()
 
+        image1 = 2.0 * (image1 / 255.0) - 1.0
+        image2 = 2.0 * (image2 / 255.0) - 1.0
+
         padder = InputPadder(image1.shape, divis_by=64)
         image1, image2 = padder.pad(image1, image2)
 
@@ -330,6 +342,9 @@ def validate_middlebury(model, split="F", mixed_prec=False):
 
         image1 = image1[None].cuda()
         image2 = image2[None].cuda()
+
+        image1 = 2.0 * (image1 / 255.0) - 1.0
+        image2 = 2.0 * (image2 / 255.0) - 1.0
 
         padder = InputPadder(image1.shape, divis_by=64)
         image1, image2 = padder.pad(image1, image2)
