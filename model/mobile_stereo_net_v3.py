@@ -350,9 +350,6 @@ class MobileStereoNetV3(nn.Module):
         self.feature_extractor = UNetFeatureExtractor(
             hidden_dims=[hidden_dim] * (down_factor + 1)
         )
-        self.cost_volume = Difference3DCostVolume(
-            hidden_dim=self.hidden_dim, max_disp=self.max_disp
-        )
         self.cost_filter = nn.Sequential(
             nn.Conv3d(
                 (self.num_groups if self.use_groupwise_cost else self.hidden_dim),
@@ -401,7 +398,7 @@ class MobileStereoNetV3(nn.Module):
                 l_fmaps[0], r_fmaps[0], self.max_disp, self.num_groups
             )
             if self.use_groupwise_cost
-            else self.cost_volume(l_fmaps[0], r_fmaps[0])
+            else make_cost_volume(l_fmaps[0], r_fmaps[0], self.max_disp)
         )
         # cost_volume: 1 x 24 x 60 x 80
         cost_volume = self.cost_filter(cost_volume).squeeze(1)
