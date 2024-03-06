@@ -17,16 +17,16 @@ import gflags
 
 gflags.DEFINE_string(
     "base_config_json",
-    "configure/stereo_base_net_v4.json",
+    "configure/stereo_base_net_v3.json",
     "experiment configure json file",
 )
 gflags.DEFINE_string(
     "model_chkpt_file",
-    "experiments/TRAINER_BASE_V4/checkpoints/TRAINER_BASE_V4-epoch-150000.pth.gz",
+    "experiments/TRAINER_BASE_V3/checkpoints/TRAINER_BASE_V3-epoch-100000.pth.gz",
     "model checkpont file",
 )
 gflags.DEFINE_list(
-    "test_datasets", ["realsense", "middlebury_Q"], "test datasets for evaluation"
+    "test_datasets", ["realsense_test", "middlebury_Q"], "test datasets for evaluation"
 )
 
 autocast = torch.cuda.amp.autocast
@@ -37,11 +37,11 @@ def count_parameters(model):
 
 
 @torch.no_grad()
-def validate_realsense(model, mixed_prec=False):
+def validate_realsense(model, split, mixed_prec=False):
     """Peform validation using the Realsense (train) split"""
     model.eval()
     aug_params = {}
-    val_dataset = datasets.RealsenseDataset(aug_params)
+    val_dataset = datasets.RealsenseDataset(aug_params, split=split)
 
     out_list, epe_list, fps_list = [], [], []
     for val_id in range(len(val_dataset)):
@@ -65,6 +65,7 @@ def validate_realsense(model, mixed_prec=False):
             (valid_gt.flatten() >= 0.5)
             & (torch.isnan(flow_pr.flatten()) == 0)
             & (flow_pr.flatten() > 0.0)
+            & (flow_pr.flatten() < 192.0)
         )
         out_0_5 = epe_flattened > 0.5
         out_1_0 = epe_flattened > 1.0
@@ -137,6 +138,7 @@ def validate_eth3d(model, mixed_prec=False):
             (valid_gt.flatten() >= 0.5)
             & (torch.isnan(flow_pr.flatten()) == 0)
             & (flow_pr.flatten() > 0.0)
+            & (flow_pr.flatten() < 192.0)
         )
         out_0_5 = epe_flattened > 0.5
         out_1_0 = epe_flattened > 1.0
@@ -215,6 +217,7 @@ def validate_kitti(model, mixed_prec=False):
             (valid_gt.flatten() >= 0.5)
             & (torch.isnan(flow_pr.flatten()) == 0)
             & (flow_pr.flatten() > 0.0)
+            & (flow_pr.flatten() < 192.0)
         )
 
         out = epe_flattened > 1.0
@@ -291,6 +294,7 @@ def validate_things(model, mixed_prec=False):
             & (flow_gt.abs().flatten() < 192)
             & (torch.isnan(flow_pr.flatten()) == 0)
             & (flow_pr.flatten() > 0.0)
+            & (flow_pr.flatten() < 192.0)
         )
 
         out = epe > 1.0
@@ -443,7 +447,9 @@ def main():
     model = torch.nn.DataParallel(MobileStereoBase(base_config)).to(device)
 
     sample = torch.rand(size=(1, 3, 480, 640), dtype=torch.float32).to(device)
-    _ = get_model_capacity(module=copy.deepcopy(model.module), inputs=(sample, sample, False), verbose=True)
+    _ = get_model_capacity(
+        module=copy.deepcopy(model.module), inputs=(sample, sample, False), verbose=True
+    )
     del sample
     torch.cuda.empty_cache()
 
@@ -465,8 +471,10 @@ def main():
     use_mixed_precision = True
 
     for dataset in FLAGS.test_datasets:
-        if dataset == "realsense":
-            validate_realsense(model, mixed_prec=use_mixed_precision)
+        if "realsense" in dataset:
+            validate_realsense(
+                model, split=dataset.split("_")[-1], mixed_prec=use_mixed_precision
+            )
 
         elif dataset == "eth3d":
             validate_eth3d(model, mixed_prec=use_mixed_precision)
