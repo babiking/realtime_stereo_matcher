@@ -259,7 +259,7 @@ class MobileStereoNetV4(nn.Module):
         # x: 1 x 1 x 60 x 80
         x = torch.sum(x * d.view(1, -1, 1, 1), dim=1, keepdim=True)
 
-        multi_scale = []
+        multi_scale = [x] if is_train else []
         for i, refine in enumerate(self.refine_layers):
             # x: 1 x 1 x 60 x 80
             # l_fmaps[i + 1]: 1 x 32 x 120 x 160
