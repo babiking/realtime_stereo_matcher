@@ -3,7 +3,7 @@
     "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/200K_STEREO_NET_V4_FINETUNE",
     "train": {
         "batch_size": 6,
-        "restore_checkpoint": "",
+        "restore_checkpoint": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/200K_STEREO_NET_V4/checkpoints/200K_STEREO_NET_V4-epoch-180000.pth.gz",
         "save_checkpoint_frequency": 1000,
         "datasets": [
             "realsense_train"
