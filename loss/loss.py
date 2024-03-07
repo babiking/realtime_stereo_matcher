@@ -184,7 +184,9 @@ class LRConsistentLoss(BaseLoss):
         return warped
 
     def get_loss_item(self, i, n, l_flow_gt, l_flow_pred, l_fmap, r_fmap):
-        l_fmap_warp = self.warp_by_flow_map(r_fmap, l_flow_gt)
+        assert l_fmap.shape[-2:] == l_flow_pred.shape[-2:]
+
+        l_fmap_warp = self.warp_by_flow_map(r_fmap, l_flow_pred)
 
         return self.loss_func(l_fmap, l_fmap_warp).mean(1).unsqueeze(1)
 
