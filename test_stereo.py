@@ -18,12 +18,12 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/other_fast_acv_net_config.json",
+    "configure/stereo_net_config_v4_finetune.json",
     "experiment configure json file",
 )
 gflags.DEFINE_string(
     "model_chkpt_file",
-    "others/fast_acv_net/checkpoint/Fast_ACVNet_generalization.ckpt",
+    "experiments/200K_STEREO_NET_V4_FINETUNE/checkpoints/200K_STEREO_NET_V4_FINETUNE-epoch-5000.pth.gz",
     "model checkpont file",
 )
 gflags.DEFINE_string(
@@ -62,7 +62,7 @@ def export_stereo_model_to_onnx(model, onnx_file, device):
 
     torch.onnx.export(
         model.module,
-        (left, right),
+        (left, right, False),
         onnx_file,
         verbose=False,
         input_names=["input0", "input1"],
@@ -158,6 +158,9 @@ def main():
 
         l_img = l_img[None].cuda()
         r_img = r_img[None].cuda()
+
+        l_img = 2.0 * (l_img / 255.0) - 1.0
+        r_img = 2.0 * (r_img / 255.0) - 1.0
 
         with autocast(enabled=use_mixed_precision):
             start = time.time()
