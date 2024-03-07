@@ -30,7 +30,7 @@
                     "loss_gamma": 0.9,
                     "max_flow_magnitude": 700
                 },
-                "weight": 1.0
+                "weight": 0.05
             }
         ]
     },
