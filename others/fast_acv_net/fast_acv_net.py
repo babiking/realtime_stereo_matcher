@@ -444,9 +444,6 @@ class Fast_ACVNet(nn.Module):
         return concat_volume
 
     def forward(self, left, right):
-        left = left / 255.0 - 1.0
-        right = right / 255.0 - 1.0
-
         features_left = self.feature(left)
         features_right = self.feature(right)
         features_left, features_right = self.feature_up(features_left, features_right)
@@ -465,12 +462,18 @@ class Fast_ACVNet(nn.Module):
         features_left[1] = torch.cat((features_left[1], stem_8x), 1)
         features_right[1] = torch.cat((features_right[1], stem_8y), 1)
 
+        # corr_volume: 1 x 12 x 24 x 64 x 80, 8x
         corr_volume = build_gwc_volume_norm(
             features_left[1], features_right[1], self.maxdisp // 8, 12
         )
         corr_volume = self.patch(corr_volume)
+
+        # cost_att: 1 x 12 x 24 x 64 x 80, 8x, left image feature guided attention weights
         cost_att = self.corr_feature_att_8(corr_volume, features_left[1])
+        # cost_att: 1 x 1 x 24 x 64 x 80, 8x, left image features guided hourglass filtering
         cost_att = self.hourglass_att(cost_att, features_left)
+
+        # att_weights: 1 x 1 x 48 x 120 x 240, 4x, cost volume, V_init
         att_weights = F.interpolate(
             cost_att,
             [self.maxdisp // 4, left.size()[2] // 4, left.size()[3] // 4],
@@ -478,26 +481,35 @@ class Fast_ACVNet(nn.Module):
         )
 
         pred_att = torch.squeeze(att_weights, 1)
+        # pred_att_prob: 1 x 48 x 120 x 160, P_init
         pred_att_prob = F.softmax(pred_att, dim=1)
+        # pred_att: 1 x 1 x 120 x 160, D_init
         pred_att = disparity_regression(pred_att_prob, self.maxdisp // 4)
+        # pred_variance: 1 x 1 x 120 x 160, U_i, confidence uncertainty, 
         pred_variance = disparity_variance(
             pred_att_prob, self.maxdisp // 4, pred_att.unsqueeze(1)
         )
         pred_variance = self.beta + self.gamma * pred_variance
         pred_variance = torch.sigmoid(pred_variance)
+
+        # pred_variance_samples: 1 x 5 x 120 x 160,  C_m_i
         pred_variance_samples = self.propagation(pred_variance)
 
+        # disparity_samples: 1 x 5 x 120 x 160
         disparity_samples = self.propagation(pred_att.unsqueeze(1))
         right_feature_x4, left_feature_x4 = SpatialTransformer_grid(
             stem_4x, stem_4y, disparity_samples
         )
         disparity_sample_strength = (left_feature_x4 * right_feature_x4).mean(dim=1)
+        # disparity_sample_strength: 1 x 5 x 120 x 160, cross shape propagation weights, W_m_i
         disparity_sample_strength = torch.softmax(
             disparity_sample_strength * pred_variance_samples, dim=1
         )
+        # att_weights: 1 x 1 x 48 x 120 x 160, cost volume after VAP, V_p_i_d
         att_weights = self.propagation_prob(att_weights)
         att_weights = att_weights * disparity_sample_strength.unsqueeze(2)
         att_weights = torch.sum(att_weights, dim=1, keepdim=True)
+        
         att_weights_prob = F.softmax(att_weights, dim=2)
 
         _, ind = att_weights_prob.sort(2, True)
@@ -511,6 +523,7 @@ class Fast_ACVNet(nn.Module):
         if not self.att_weights_only:
             concat_features_left = self.concat_feature(features_left[0])
             concat_features_right = self.concat_feature(features_right[0])
+            # concat_volume: 1 x 32 x 24 x 120 x 160, concat volume
             concat_volume = self.concat_volume_generator(
                 concat_features_left, concat_features_right, disparity_sample_topk
             )
