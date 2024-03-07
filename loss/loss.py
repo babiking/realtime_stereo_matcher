@@ -103,7 +103,7 @@ class BaseLoss(nn.Module):
                     l_flow_pred_i * scale,
                     size=(l_flow_gt.shape[-2:]),
                     mode="bilinear",
-                    align_corners=False,
+                    align_corners=True,
                 )
 
             loss_item = self.get_loss_item(
@@ -176,7 +176,7 @@ class LRConsistentLoss(BaseLoss):
     def get_loss_item(self, i, n, l_flow_gt, l_flow_pred, l_fmap, r_fmap):
         assert l_flow_pred.shape[-2:] == l_fmap.shape[-2:]
 
-        l_fmap_warp = self.warp_by_flow_map(r_fmap, l_flow_pred)
+        l_fmap_warp = self.warp_by_flow_map(r_fmap, l_flow_gt)
 
         return self.loss_func(l_fmap, l_fmap_warp).mean(1).unsqueeze(1)
 
