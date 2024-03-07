@@ -13,7 +13,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from model import build_model
-from loss import build_loss_function
+from loss.loss import LossFactory
 from loss.loss import get_flow_map_metrics
 import dataset.stereo_datasets as datasets
 from torch.cuda.amp import GradScaler
@@ -24,7 +24,7 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/other_fast_acv_net_config.json",
+    "configure/stereo_net_config_v4_consistent.json",
     "experiment configure json file",
 )
 
@@ -141,7 +141,7 @@ def train(exp_config):
     model = nn.DataParallel(build_model(exp_config["model"]))
     logging.info(f"Model parameter count (pytorch): {count_parameters(model)}.")
 
-    loss_func = build_loss_function(exp_config["train"]["loss"])
+    loss_func = LossFactory(loss_configs=exp_config["train"]["loss"])
 
     train_loader = datasets.fetch_dataloader(exp_config)
     optimizer, scheduler = fetch_optimizer(exp_config, model)
@@ -182,7 +182,7 @@ def train(exp_config):
 
             n, c, src_h, src_w = image1.shape
 
-            align = 2 ** 4
+            align = 2**4
             w_pad = (align - (src_w % align)) % align
             h_pad = (align - (src_h % align)) % align
 
@@ -194,16 +194,10 @@ def train(exp_config):
             valid = F.pad(valid, (0, w_pad, 0, h_pad))
 
             assert model.training
-            flow_predictions = model(image1, image2)
+            flow_predictions, l_fmaps, r_fmaps = model(image1, image2, is_train=True)
             assert model.training
 
-            loss = loss_func(
-                flow,
-                valid,
-                flow_predictions,
-                [None for _ in range(len(flow_predictions))],
-                [None for _ in range(len(flow_predictions))],
-            )
+            loss = loss_func(flow, valid, flow_predictions, l_fmaps, r_fmaps)
             metrics = get_flow_map_metrics(flow, flow_predictions[-1], valid)
             logger.writer.add_scalar("live_loss", loss.item(), global_batch_num)
             logger.writer.add_scalar(

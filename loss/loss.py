@@ -98,19 +98,29 @@ class BaseLoss(nn.Module):
             assert not torch.isinf(l_flow_pred_i).any()
 
             if l_flow_gt.shape[-2:] != l_flow_pred_i.shape[-2:]:
-                scale = float(l_flow_gt.shape[-1]) / l_flow_pred_i.shape[-1]
-                l_flow_pred_i = F.interpolate(
-                    l_flow_pred_i * scale,
-                    size=(l_flow_gt.shape[-2:]),
+                scale = float(l_flow_pred_i.shape[-1]) / l_flow_gt.shape[-1]
+                l_flow_gt_i = F.interpolate(
+                    l_flow_gt * scale,
+                    size=(l_flow_pred_i.shape[-2:]),
                     mode="bilinear",
                     align_corners=True,
                 )
+                l_flow_valid_i = F.interpolate(
+                    l_flow_valid.float(),
+                    size=(l_flow_pred_i.shape[-2:]),
+                    mode="bilinear",
+                    align_corners=True,
+                )
+                l_flow_valid_i = l_flow_valid_i > 0.5
+            else:
+                l_flow_gt_i = l_flow_gt
+                l_flow_valid_i = l_flow_valid
 
             loss_item = self.get_loss_item(
-                i, n_preds, l_flow_gt, l_flow_pred_i, l_fmaps[i], r_fmaps[i]
+                i, n_preds, l_flow_gt_i, l_flow_pred_i, l_fmaps[i], r_fmaps[i]
             )
 
-            l_flow_loss += l_flow_weight * loss_item[l_flow_valid.bool()].mean()
+            l_flow_loss += l_flow_weight * loss_item[l_flow_valid_i.bool()].mean()
         return l_flow_loss
 
 
@@ -174,8 +184,6 @@ class LRConsistentLoss(BaseLoss):
         return warped
 
     def get_loss_item(self, i, n, l_flow_gt, l_flow_pred, l_fmap, r_fmap):
-        assert l_flow_pred.shape[-2:] == l_fmap.shape[-2:]
-
         l_fmap_warp = self.warp_by_flow_map(r_fmap, l_flow_gt)
 
         return self.loss_func(l_fmap, l_fmap_warp).mean(1).unsqueeze(1)

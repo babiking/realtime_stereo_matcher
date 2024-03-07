@@ -370,4 +370,4 @@ class MobileStereoNetV4(nn.Module):
 
             if is_train or i == len(self.refine_layers) - 1:
                 multi_scale.append(x)
-        return multi_scale
+        return (multi_scale, l_fmaps, r_fmaps) if is_train else multi_scale
