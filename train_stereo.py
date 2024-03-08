@@ -24,7 +24,7 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/stereo_net_config_v4_consistent.json",
+    "configure/stereo_net_config_v5.json",
     "experiment configure json file",
 )
 

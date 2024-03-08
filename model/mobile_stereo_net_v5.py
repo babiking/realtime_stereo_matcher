@@ -86,7 +86,7 @@ class ResBlock(nn.Module):
 class RefineNet(nn.Module):
     def __init__(self, hidden_dim, refine_dilates, use_warp_feature=True):
         super().__init__()
-        self.in_dim = 1 + hidden_dim * (1 if use_warp_feature else 2)
+        self.in_dim = 1 + hidden_dim * (2 if use_warp_feature else 1)
         self.hidden_dim = hidden_dim
         self.refine_dilates = refine_dilates
         self.use_warp_feature = use_warp_feature
@@ -463,11 +463,11 @@ class ContextUpsample(nn.Module):
         disp_unfold = F.interpolate(
             disp_unfold,
             scale_factor=self.scale_factor,
-            mode="nearest",
+            mode="bilinear",
             align_corners=True,
         )
 
-        disp_up = (disp_up * disp_weights).sum(1)
+        disp_up = torch.sum(disp_unfold * disp_weights, dim=1, keepdim=True)
         return disp_up
 
 
@@ -477,8 +477,10 @@ class MobileStereoNetV5(nn.Module):
         extract_dims=[16, 24, 48, 64],
         up_factor=1,
         max_disp=192,
-        refine_dilates=[1, 2, 4, 8, 1, 1],
         filter_dims=[32, 32, 32, 32],
+        refine_dilates=[1, 2, 4, 8, 1, 1],
+        use_warp_feature=True,
+        context_dims=[32, 32, 32],
     ):
         super().__init__()
         self.up_factor = up_factor
@@ -506,14 +508,24 @@ class MobileStereoNetV5(nn.Module):
         )
 
         self.refine_dilates = refine_dilates
+        self.use_warp_feature = use_warp_feature
         self.refine_layers = nn.ModuleList(
             [
                 RefineNet(
                     hidden_dim=self.extract_dims[self.down_factor - 1 - i],
                     refine_dilates=self.refine_dilates,
+                    use_warp_feature=self.use_warp_feature,
                 )
                 for i in range(self.up_factor)
             ]
+        )
+
+        self.context_dims = context_dims
+        self.context_upsampler = ContextUpsample(
+            in_dims=np.flip(extract_dims[0:-up_factor]),
+            hidden_dims=context_dims,
+            scale_factor=2 ** (self.down_factor - self.up_factor),
+            unfold_radius=3,
         )
 
     def forward(self, l_img, r_img, is_train=True):
@@ -544,7 +556,8 @@ class MobileStereoNetV5(nn.Module):
             if is_train:
                 multi_scale.append(disp_up)
 
-        disp_up = self.context_upsampler(disp_up, l_fmaps[-1], r_fmaps[-1])
+        disp_up = self.context_upsampler(disp_up, l_fmaps[self.up_factor :])
+        multi_scale.append(disp_up)
 
         if is_train:
             l_fmaps = l_fmaps[0 : self.up_factor + 1] + [l_fmaps[-1]]
