@@ -224,7 +224,7 @@ class WarpHead(nn.Module):
         grid_map = torch.concatenate((grid_x, grid_y), dim=-1)
 
         warped = F.grid_sample(
-            img, grid_map, mode="bilinear", padding_mode="zeros", align_corners=False
+            img, grid_map, mode="bilinear", padding_mode="zeros", align_corners=True
         )
         return warped
 
