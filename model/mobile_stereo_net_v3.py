@@ -137,44 +137,127 @@ class ResBlock(nn.Module):
         return x + input
 
 
-def warp_by_flow_map(image, flow):
-    """
-    warp image according to stereo flow map (i.e. disparity map)
+class Warp1DOp(nn.Module):
+    def __init__(
+        self, mode="bilinear", padding_mode="zeros", align_corners=True, *args, **kwargs
+    ) -> None:
+        super().__init__(*args, **kwargs)
 
-    Args:
-        [1] image, N x C x H x W, original image or feature map
-        [2] flow,  N x 1 x H x W or N x 2 x H x W, flow map
+        self.mode = mode
+        self.padding_mode = padding_mode
+        self.align_corners = align_corners
 
-    Return:
-        [1] warped, N x C x H x W, warped image or feature map
-    """
-    n, c, h, w = flow.shape
+    def get_random_inputs(self, n=1, c=32, h=30, w=40):
+        image = torch.randn(size=(n, c, h, w), dtype=torch.float32)
+        disparity = torch.randn(size=(n, 1, h, w), dtype=torch.float32) * w
+        return (image, disparity)
 
-    assert c == 1 or c == 2, f"invalid flow map dimension 1 or 2 ({c})!"
+    def get_output_number(self):
+        return 1
 
-    grid_y, grid_x = torch.meshgrid(
-        torch.arange(h, device=image.device, dtype=image.dtype),
-        torch.arange(w, device=image.device, dtype=image.dtype),
-        indexing="ij",
-    )
+    def warp_by_flow_map(self, img, flow):
+        """
+        warp image according to stereo flow map (i.e. disparity map)
 
-    grid_x = grid_x.view([1, 1, h, w]) - flow[:, 0, :, :].view([n, 1, h, w])
-    grid_x = grid_x.permute([0, 2, 3, 1])
+        Args:
+            [1] img, N x C x H x W, original image or feature map
+            [2] flow,  N x 1 x H x W or N x 2 x H x W, flow map
 
-    if c == 2:
-        grid_y = grid_y.view([1, 1, h, w]) - flow[:, 1, :, :].view([n, 1, h, w])
-        grid_y = grid_y.permute([0, 2, 3, 1])
-    else:
-        grid_y = grid_y.view([1, h, w, 1]).repeat(n, 1, 1, 1)
+        Return:
+            [1] warped, N x C x H x W, warped image or feature map
+        """
+        n, c, h, w = flow.shape
 
-    grid_x = 2.0 * grid_x / (w - 1.0) - 1.0
-    grid_y = 2.0 * grid_y / (h - 1.0) - 1.0
-    grid_map = torch.concatenate((grid_x, grid_y), dim=-1)
+        assert c == 1 or c == 2, f"invalid flow map dimension 1 or 2 ({c})!"
 
-    warped = F.grid_sample(
-        image, grid_map, mode="bilinear", padding_mode="zeros", align_corners=True
-    )
-    return warped
+        grid_y, grid_x = torch.meshgrid(
+            torch.arange(h, device=img.device, dtype=img.dtype),
+            torch.arange(w, device=img.device, dtype=img.dtype),
+            indexing="ij",
+        )
+
+        grid_x = grid_x.view([1, 1, h, w]) - flow[:, 0, :, :].view([n, 1, h, w])
+        grid_x = grid_x.permute([0, 2, 3, 1])
+
+        if c == 2:
+            grid_y = grid_y.view([1, 1, h, w]) - flow[:, 1, :, :].view([n, 1, h, w])
+            grid_y = grid_y.permute([0, 2, 3, 1])
+        else:
+            grid_y = grid_y.view([1, h, w, 1]).repeat(n, 1, 1, 1)
+
+        grid_x = 2.0 * grid_x / (w - 1.0) - 1.0
+        grid_y = 2.0 * grid_y / (h - 1.0) - 1.0
+        grid_map = torch.concatenate((grid_x, grid_y), dim=-1)
+
+        warped = F.grid_sample(
+            img,
+            grid_map,
+            mode=self.mode,
+            padding_mode=self.padding_mode,
+            align_corners=self.align_corners,
+        )
+        return warped
+
+    def process_grid_coordinates(self, pixs, width):
+        # if self.align_corners:
+        #     pixels = (grids + 1.0) * (0.5 * (width - 1))
+        # else:
+        #     pixels = (grids + 1.0) * (0.5 * width) - 0.5
+        assert self.align_corners
+
+        if self.padding_mode == "border":
+            pixs = torch.clip(pixs, 0, width - 1)
+        elif self.padding_mode == "zeros":
+            pixs = torch.clip(pixs, -1, width) + 1
+        elif self.padding_mode == "reflection":
+            if self.align_corners:
+                pixs = (width - 1) - torch.abs(
+                    pixs % (2 * max(width - 1, 1)) - (width - 1)
+                )
+            else:
+                pixs = width - torch.abs((pixs + 0.5) % (2 * width) - width) - 0.5
+                pixs = torch.clip(pixs, 0, width - 1)
+        return pixs
+
+    def warp_by_disparity_map(self, img, disp):
+        """
+        reference: https://github.com/AlexanderLutsenko/nobuco/blob/aa4745e6abb1124d90f7d3ace6d282f923f08a40/nobuco/node_converters/grid_sampling.py#L38
+        """
+        n, _, h, w = img.shape
+
+        x = torch.arange(w, device=img.device, dtype=img.dtype)
+        x = x[None, None, None, :].repeat([n, 1, h, 1])
+        x = x - disp
+
+        x = self.process_grid_coordinates(x, w)
+
+        if self.padding_mode == "zeros":
+            x = F.pad(x, (1, 1, 0, 0), mode="constant", value=0)
+            img = F.pad(img, (1, 1, 0, 0), mode="constant", value=0)
+
+        if self.mode == "bilinear":
+            x0 = torch.floor(x).type(dtype=torch.int64)
+            x1 = torch.ceil(x).type(dtype=torch.int64)
+
+            dx = x - x0
+
+            v_x0 = torch.gather(img, dim=-1, index=x0.expand_as(img))
+            v_x1 = torch.gather(img, dim=-1, index=x1.expand_as(img))
+
+            warped = ((1.0 - dx) * v_x0 + dx * v_x1)
+                
+        elif self.mode == "nearest":
+            x0 = torch.round(x).type(dtype=torch.int64)
+            warped = torch.gather(img, dim=-1, index=x0.expand_as(img))                
+        else:
+            raise NotImplementedError
+        
+        if self.padding_mode == "zeros":
+            warped = warped[:, :, :, 1:-1]
+        return warped
+
+    def forward(self, img, disp):
+        return self.warp_by_disparity_map(img, disp)
 
 
 class RefineNet(nn.Module):
@@ -189,6 +272,9 @@ class RefineNet(nn.Module):
             *[ResBlock(self.hidden_dim, d) for d in refine_dilates],
             nn.Conv2d(self.hidden_dim, 1, 3, 1, 1),
         )
+        self.warp_head = Warp1DOp(
+            mode="nearest", padding_mode="border", align_corners=True
+        )
 
     def forward(self, disp, l_fmap, r_fmap):
         # disp: 1 x 1 x 60 x 80
@@ -202,7 +288,7 @@ class RefineNet(nn.Module):
         )
         # rgb: 1 x 3 x 120 x 160
         if self.use_warp_feature:
-            r_fmap = warp_by_flow_map(r_fmap, disp)
+            r_fmap = self.warp_head(r_fmap, disp)
 
             # x: 1 x (2 * 32 + 1) x 120 x 160
             x = torch.cat((disp, l_fmap, r_fmap), dim=1)
@@ -428,7 +514,7 @@ class MobileStereoNetV3(nn.Module):
             ]
         )
 
-    def forward(self, l_img, r_img):
+    def forward(self, l_img, r_img, is_train=True):
         # l_fmaps:
         #   [1] 1 x 32 x 60 x 80, i.e. 8x downsample
         #   [2] 1 x 32 x 120 x 160
@@ -457,10 +543,12 @@ class MobileStereoNetV3(nn.Module):
         # x: 1 x 1 x 60 x 80
         x = torch.sum(x * d.view(1, -1, 1, 1), dim=1, keepdim=True)
 
-        multi_scale = []
+        multi_scale = [x] if is_train else []
         for i, refine in enumerate(self.refine_layers):
             # x: 1 x 1 x 60 x 80
             # l_fmaps[i + 1]: 1 x 32 x 120 x 160
             x = refine(x, l_fmaps[i + 1], r_fmaps[i + 1])
-            multi_scale.append(x)
-        return multi_scale
+
+            if is_train or i == len(self.refine_layers) - 1:
+                multi_scale.append(x)
+        return (multi_scale, l_fmaps, r_fmaps) if is_train else multi_scale
