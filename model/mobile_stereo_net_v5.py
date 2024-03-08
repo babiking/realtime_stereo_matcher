@@ -465,7 +465,7 @@ class ContextUpsample(nn.Module):
             scale_factor=self.scale_factor,
             mode="bilinear",
             align_corners=True,
-        )
+        ) * float(self.scale_factor)
 
         disp_up = torch.sum(disp_unfold * disp_weights, dim=1, keepdim=True)
         return disp_up
