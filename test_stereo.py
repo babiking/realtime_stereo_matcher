@@ -18,17 +18,17 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/stereo_net_config_v3_finetune.json",
+    "configure/other_fast_acv_net_config.json",
     "experiment configure json file",
 )
 gflags.DEFINE_string(
     "model_chkpt_file",
-    "experiments/STEREO_NET_V3_FINETUNE/checkpoints/STEREO_NET_V3_FINETUNE-epoch-4000.pth.gz",
+    "others/fast_acv_net/checkpoint/Fast_ACVNet_generalization.ckpt",
     "model checkpont file",
 )
 gflags.DEFINE_string(
     "left",
-    "/mnt/data/workspace/datasets/VM3140/image/*_left_Img.png",
+    "/mnt/data/workspace/datasets/D435I/outdoor_blank_plane//image/*_left_Img.*",
     "left images",
 )
 gflags.DEFINE_list(
@@ -38,7 +38,7 @@ gflags.DEFINE_list(
 )
 gflags.DEFINE_string(
     "output",
-    "/mnt/data/workspace/datasets/VM3140/predict",
+    "/mnt/data/workspace/datasets/D435I/outdoor_blank_plane//predict",
     "output path",
 )
 gflags.DEFINE_boolean(
@@ -166,13 +166,7 @@ def main():
             start = time.time()
             if FLAGS.use_onnx_inference:
                 flow_pr = run_onnx_inference(
-                    l_img=F.interpolate(
-                        l_img, size=(480, 640), mode="bilinear", align_corners=True
-                    ),
-                    r_img=F.interpolate(
-                        r_img, size=(480, 640), mode="bilinear", align_corners=True
-                    ),
-                    onnx_file=onnx_file,
+                    l_img=l_img, r_img=r_img, onnx_file=onnx_file
                 )[-1]
                 flow_pr = torch.tensor(flow_pr, dtype=torch.float32).squeeze(0)
             else:
