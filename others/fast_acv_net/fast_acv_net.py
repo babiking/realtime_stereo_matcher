@@ -485,7 +485,7 @@ class Fast_ACVNet(nn.Module):
         pred_att_prob = F.softmax(pred_att, dim=1)
         # pred_att: 1 x 1 x 120 x 160, D_init
         pred_att = disparity_regression(pred_att_prob, self.maxdisp // 4)
-        # pred_variance: 1 x 1 x 120 x 160, U_i, confidence uncertainty, 
+        # pred_variance: 1 x 1 x 120 x 160, U_i, confidence uncertainty,
         pred_variance = disparity_variance(
             pred_att_prob, self.maxdisp // 4, pred_att.unsqueeze(1)
         )
@@ -509,7 +509,7 @@ class Fast_ACVNet(nn.Module):
         att_weights = self.propagation_prob(att_weights)
         att_weights = att_weights * disparity_sample_strength.unsqueeze(2)
         att_weights = torch.sum(att_weights, dim=1, keepdim=True)
-        
+
         att_weights_prob = F.softmax(att_weights, dim=2)
 
         _, ind = att_weights_prob.sort(2, True)
@@ -543,16 +543,24 @@ class Fast_ACVNet(nn.Module):
             pred_att = torch.sum(att_prob * disparity_sample_topk, dim=1)
             pred_att_up = context_upsample(pred_att.unsqueeze(1), spx_pred)
             if self.att_weights_only:
-                return [pred_att.unsqueeze(1), pred_att_up.unsqueeze(1) * 4.0]
+                return (
+                    [pred_att.unsqueeze(1), pred_att_up.unsqueeze(1) * 4.0],
+                    [None] * 2,
+                    [None] * 2,
+                )
             else:
                 pred = regression_topk(cost.squeeze(1), disparity_sample_topk, 2)
                 pred_up = context_upsample(pred, spx_pred)
-                return [
-                    pred_att.unsqueeze(1),
-                    pred.squeeze(1).unsqueeze(1),
-                    pred_att_up.unsqueeze(1) * 4.0,
-                    pred_up.unsqueeze(1) * 4.0,
-                ]
+                return (
+                    [
+                        pred_att.unsqueeze(1),
+                        pred.squeeze(1).unsqueeze(1),
+                        pred_att_up.unsqueeze(1) * 4.0,
+                        pred_up.unsqueeze(1) * 4.0,
+                    ],
+                    [None] * 4,
+                    [None] * 4,
+                )
 
         else:
             if self.att_weights_only:
