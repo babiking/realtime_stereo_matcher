@@ -443,7 +443,7 @@ class Fast_ACVNet(nn.Module):
         concat_volume = torch.cat((left_feature_map, right_feature_map), dim=1)
         return concat_volume
 
-    def forward(self, left, right):
+    def forward(self, left, right, is_train=True):
         features_left = self.feature(left)
         features_right = self.feature(right)
         features_left, features_right = self.feature_up(features_left, features_right)
