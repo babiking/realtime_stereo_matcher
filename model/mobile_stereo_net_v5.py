@@ -107,7 +107,7 @@ class RefineNet(nn.Module):
         # r_fmap: 1 x 32 x 120 x 160
 
         # disp: 1 x 1 x 120 x 160
-        disp = F.interpolate(disp, scale_factor=2, mode="nearest") * 2.0
+        disp = F.interpolate(disp, scale_factor=2, mode="bilinear", align_corners=True) * 2.0
 
         if self.use_warp_feature:
             r_fmap = self.warp_head(r_fmap, disp)
@@ -548,7 +548,8 @@ class ContextUpsample(nn.Module):
         disp_unfold = F.interpolate(
             disp_unfold,
             scale_factor=self.scale_factor,
-            mode="nearest"
+            mode="bilinear",
+            align_corners=True
         ) * float(self.scale_factor)
 
         disp_up = torch.sum(disp_unfold * disp_weights, dim=1, keepdim=True)

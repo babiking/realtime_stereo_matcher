@@ -1,0 +1,80 @@
+{
+    "name": "200K_STEREO_NET_V5_FINETUNE",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/200K_STEREO_NET_V5_FINETUNE",
+    "train": {
+        "batch_size": 6,
+        "restore_checkpoint": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/200K_STEREO_NET_V5/checkpoints/200K_STEREO_NET_V5-epoch-200000.pth.gz",
+        "save_checkpoint_frequency": 1000,
+        "datasets": [
+            "middlebury_Q",
+            "realsense_train"
+        ],
+        "learn_rate": 0.000004,
+        "num_of_steps": 20000,
+        "weight_decay": 0.00001,
+        "loss": [{
+            "type": "SequenceLoss",
+            "parameters": {
+                "loss_gamma": 0.7,
+                "max_flow_magnitude": 700
+            }
+        }]
+    },
+    "test": {
+        "datasets": [
+            "realsense_test",
+            "middlebury_Q",
+            "kitti"
+        ]
+    },
+    "model": {
+        "type": "MobileStereoNetV5",
+        "parameters": {
+            "extract_dims": [
+                16,
+                24,
+                48,
+                64
+            ],
+            "up_factor": 1,
+            "max_disp": 192,
+            "use_warp_feature": true,
+            "refine_dilates": [
+                1,
+                2,
+                4,
+                8,
+                1,
+                1
+            ],
+            "filter_dims": [
+                32,
+                32,
+                32,
+                32
+            ],
+            "context_dims": [
+                32,
+                32,
+                32
+            ]
+        }
+    },
+    "data": {
+        "image_size": [
+            480,
+            640
+        ],
+        "image_gamma": [],
+        "spatial_scale": [
+            -0.2,
+            0.4
+        ],
+        "saturation_range": [
+            0,
+            1.4
+        ],
+        "do_flip": false,
+        "no_y_jitter": false
+    }
+}

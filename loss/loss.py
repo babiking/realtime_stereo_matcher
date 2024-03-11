@@ -132,7 +132,7 @@ class SequenceLoss(BaseLoss):
         self.smooth_l1_loss_func = nn.SmoothL1Loss(reduction="none", beta=1.0)
 
     def get_loss_item(self, i, n, l_flow_gt, l_flow_pred, l_fmap=None, r_fmap=None):
-        if i == n - 1:
+        if i != n - 1:
             return self.smooth_l1_loss_func(l_flow_gt, l_flow_pred)
         else:
             return self.l1_loss_func(l_flow_gt, l_flow_pred)
