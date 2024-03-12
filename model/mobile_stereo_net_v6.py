@@ -75,7 +75,7 @@ class MobileNetV2(ModuleWithInit):
 
 class FeatureUpsample(ModuleWithInit):
     def __init__(self, hidden_dims=[24, 32, 96, 160], *args, **kwargs):
-        super(FeatureUpsample, self).__init__()
+        super(FeatureUpsample, self).__init__(*args, **kwargs)
         self.hidden_dims = hidden_dims
 
         self.deconv_layers = nn.ModuleList()
@@ -186,9 +186,9 @@ class MobileV2FeatureExtract(nn.Module):
         # stem_fmaps = [x2, x4, x8]
         stem_fmaps = self.stem(x)
 
-        x4 = torch.concat((mobile_fmaps[0], stem_fmaps[1]), dim=1)
-        x8 = torch.concat((mobile_fmaps[1], stem_fmaps[2]), dim=1)
-        return [x4, x8]
+        mobile_fmaps[0] = torch.concat((mobile_fmaps[0], stem_fmaps[1]), dim=1)
+        mobile_fmaps[1] = torch.concat((mobile_fmaps[1], stem_fmaps[2]), dim=1)
+        return mobile_fmaps
 
 
 class Warp1DOp(nn.Module):
@@ -352,7 +352,9 @@ class GroupwiseCostVolume3D(nn.Module):
         n, c, h, w = l_fmap.shape
 
         cost_volume = torch.ones(
-            size=[n, self.num_cost_groups, self.max_disp, h, w], dtype=l_fmap.dtype, device=l_fmap.device
+            size=[n, self.num_cost_groups, self.max_disp, h, w],
+            dtype=l_fmap.dtype,
+            device=l_fmap.device,
         )
 
         # for any disparity d:
@@ -403,6 +405,208 @@ class GroupwiseCostVolume3D(nn.Module):
         )
 
 
+class CostAttention3D(ModuleWithInit):
+    def __init__(self, fmap_dim, cost_dim, hidden_dim=None, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        self.fmap_dim = fmap_dim
+        self.cost_dim = cost_dim
+        self.hidden_dim = hidden_dim if hidden_dim is not None else (fmap_dim // 2)
+
+        self.fmap_att = nn.Sequential(
+            BasicConv(fmap_dim, self.hidden_dim, kernel_size=1, stride=1, padding=0),
+            nn.Conv2d(self.hidden_dim, cost_dim, 1),
+        )
+
+        self.weight_init()
+
+    def forward(self, cost_volume, l_fmap):
+        l_fmap_att = self.fmap_att(l_fmap).unsqueeze(2)
+        return torch.sigmoid(l_fmap_att) * cost_volume
+
+
+class CostHourglassAttention3D(ModuleWithInit):
+    def __init__(self, cost_dim, fmap_dims):
+        super(CostHourglassAttention3D, self).__init__()
+
+        self.cost_dim = cost_dim
+        # fmap_dims = [x4, x8, x16, x32]
+        self.fmap_dims = fmap_dims
+        self.conv1 = nn.Sequential(
+            BasicConv(
+                cost_dim,
+                cost_dim * 2,
+                is_3d=True,
+                bn=True,
+                relu=True,
+                kernel_size=3,
+                padding=1,
+                stride=2,
+                dilation=1,
+            ),
+            BasicConv(
+                cost_dim * 2,
+                cost_dim * 2,
+                is_3d=True,
+                bn=True,
+                relu=True,
+                kernel_size=3,
+                padding=1,
+                stride=1,
+                dilation=1,
+            ),
+        )
+
+        self.conv2 = nn.Sequential(
+            BasicConv(
+                cost_dim * 2,
+                cost_dim * 4,
+                is_3d=True,
+                bn=True,
+                relu=True,
+                kernel_size=3,
+                padding=1,
+                stride=2,
+                dilation=1,
+            ),
+            BasicConv(
+                cost_dim * 4,
+                cost_dim * 4,
+                is_3d=True,
+                bn=True,
+                relu=True,
+                kernel_size=3,
+                padding=1,
+                stride=1,
+                dilation=1,
+            ),
+        )
+
+        self.conv2_up = BasicConv(
+            cost_dim * 4,
+            cost_dim * 2,
+            deconv=True,
+            is_3d=True,
+            bn=True,
+            relu=True,
+            kernel_size=(4, 4, 4),
+            padding=(1, 1, 1),
+            stride=(2, 2, 2),
+        )
+
+        self.conv1_up = BasicConv(
+            cost_dim * 2,
+            cost_dim,
+            deconv=True,
+            is_3d=True,
+            bn=True,
+            relu=True,
+            kernel_size=(4, 4, 4),
+            padding=(1, 1, 1),
+            stride=(2, 2, 2),
+        )
+        self.conv_out = nn.Conv3d(cost_dim, 1, 3, 1, 1, bias=False)
+
+        self.aggregate = nn.Sequential(
+            BasicConv(
+                cost_dim * 4,
+                cost_dim * 2,
+                is_3d=True,
+                kernel_size=1,
+                padding=0,
+                stride=1,
+            ),
+            BasicConv(
+                cost_dim * 2,
+                cost_dim * 2,
+                is_3d=True,
+                kernel_size=3,
+                padding=1,
+                stride=1,
+            ),
+            BasicConv(
+                cost_dim * 2,
+                cost_dim * 2,
+                is_3d=True,
+                kernel_size=3,
+                padding=1,
+                stride=1,
+            ),
+        )
+
+        self.cost_att_16x = CostAttention3D(
+            cost_dim=cost_dim * 2, fmap_dim=fmap_dims[2]
+        )
+        self.cost_att_32x = CostAttention3D(
+            cost_dim=cost_dim * 4, fmap_dim=fmap_dims[3]
+        )
+        self.cost_att_up_16x = CostAttention3D(
+            cost_dim=cost_dim * 2, fmap_dim=fmap_dims[2]
+        )
+
+    def forward(self, cost_volume, l_fmaps):
+        _, _, l_fmap_16x, l_fmap_32x = l_fmaps
+
+        conv1 = self.conv1(cost_volume)
+        conv1 = self.cost_att_16x(conv1, l_fmap_16x)
+
+        conv2 = self.conv2(conv1)
+        conv2 = self.cost_att_32x(conv2, l_fmap_32x)
+
+        conv2_up = self.conv2_up(conv2)
+
+        conv2_cat = torch.cat((conv2_up, conv1), dim=1)
+        conv2_cat = self.aggregate(conv2_cat)
+        conv2_cat = self.cost_att_up_16x(conv2_cat, l_fmap_16x)
+
+        conv1_up = self.conv1_up(conv2_cat)
+        cost_weights = self.conv_out(conv1_up)
+        return cost_weights
+
+
+class CostFilter3D(ModuleWithInit):
+    def __init__(self, max_disp, cost_dim, fmap_dims, *args, **kwargs):
+        super(CostFilter3D, self).__init__()
+
+        self.max_disp = max_disp
+        self.cost_dim = cost_dim
+        self.fmap_dims = fmap_dims
+        self.cost_att_8x = CostAttention3D(fmap_dim=fmap_dims[1], cost_dim=cost_dim)
+
+        self.conv_in = nn.Conv3d(
+            cost_dim,
+            cost_dim,
+            kernel_size=(1, 3, 3),
+            stride=1,
+            dilation=1,
+            groups=cost_dim,
+            padding=(0, 1, 1),
+            bias=False,
+        )
+
+        self.cost_hourglass_att_8x = CostHourglassAttention3D(
+            cost_dim=cost_dim, fmap_dims=fmap_dims
+        )
+
+        self.weight_init()
+
+    def forward(self, cost_volume_8x, l_fmaps):
+        cost_volume_8x = self.conv_in(cost_volume_8x)
+
+        # cost_volume_8x: 1 x 12 x 24 x 64 x 80, 8x, left image feature guided attention weights
+        cost_volume_8x = self.cost_att_8x(cost_volume_8x, l_fmaps[1])
+        # cost_weights_8x: 1 x 1 x 24 x 64 x 80, 8x, left image features guided hourglass filtering
+        cost_weights_8x = self.cost_hourglass_att_8x(cost_volume_8x, l_fmaps)
+
+        # cost_weights_4x: 1 x 1 x 48 x 120 x 240, 4x, cost volume, V_init
+        cost_weights_4x = F.interpolate(
+            cost_weights_8x,
+            [self.max_disp // 4, l_fmaps[0].shape[2], l_fmaps[0].shape[3]],
+            mode="trilinear",
+        )
+        return cost_weights_4x
+
+
 class MobileStereoNetV6(nn.Module):
     def __init__(
         self,
@@ -421,6 +625,15 @@ class MobileStereoNetV6(nn.Module):
             in_dim=in_dim, stem_hidden_dims=stem_hidden_dims, stem_out_dim=stem_out_dim
         )
 
+        # concat with stem at 4x and 8x
+        self.fmap_dims = self.feature_extractor.upsample.hidden_dims
+        self.fmap_dims = [
+            d * (1 if i == len(self.fmap_dims) - 1 else 2)
+            for i, d in enumerate(self.fmap_dims)
+        ]
+        self.fmap_dims[0] += stem_hidden_dims[1]
+        self.fmap_dims[1] += stem_out_dim
+
         self.warp_head = Warp1DOp(
             mode="bilinear", padding_mode="border", align_corners=True
         )
@@ -431,16 +644,30 @@ class MobileStereoNetV6(nn.Module):
             num_cost_groups=num_cost_groups,
         )
 
+        self.cost_filter = CostFilter3D(
+            max_disp=self.max_disp,
+            cost_dim=self.num_cost_groups,
+            fmap_dims=self.fmap_dims,
+        )
+
     def concat_volume_generator(self, l_fmap, r_fmap, l_disp):
         r_fmap_warp = self.warp_head(r_fmap, l_disp)
         concat_volume = torch.cat((l_fmap, r_fmap_warp), dim=1)
         return concat_volume
 
     def forward(self, l_img, r_img, is_train=True):
-        l_fmap_4x, l_fmap_8x = self.feature_extractor(l_img)
-        r_fmap_4x, r_fmap_8x = self.feature_extractor(r_img)
+        # l_fmaps = [x4, x8, x16, x32]
+        l_fmaps = self.feature_extractor(l_img)
+        r_fmaps = self.feature_extractor(r_img)
 
         # cost_volume: 1 x 12 x 24 x 60 x 80, 8x
-        cost_volume = self.cost_builder(l_fmap_8x, r_fmap_8x)
+        cost_volume_8x = self.cost_builder(l_fmaps[1], r_fmaps[1])
 
+        cost_weights_4x = self.cost_filter(cost_volume_8x, l_fmaps)
         print()
+
+
+model = MobileStereoNetV6()
+x = torch.rand((1, 3, 480, 640))
+y = torch.rand((1, 3, 480, 640))
+_ = model(x, y)
