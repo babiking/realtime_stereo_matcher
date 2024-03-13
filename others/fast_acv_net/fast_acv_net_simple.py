@@ -587,10 +587,10 @@ class FastACVNetSimple(nn.Module):
             cost_weights_8x,
             [self.max_disp // 4, left.shape[2] // 4, left.shape[3] // 4],
             mode="trilinear",
-        )
+        ).squeeze(1)
 
         # disp_probs_4x: 1 x 48 x 120 x 160, D_init
-        disp_probs_4x = F.softmax(cost_weights_4x.squeeze(1), dim=1)
+        disp_probs_4x = F.softmax(cost_weights_4x, dim=1)
         # disp_init_4x: 1 x 1 x 120 x 160, D_init
         disp_init_4x = disparity_regression(disp_probs_4x, self.max_disp // 4)
         # disp_var_4x: 1 x 1 x 120 x 160, U_i, confidence uncertainty,
@@ -617,7 +617,7 @@ class FastACVNetSimple(nn.Module):
         disp_match_4x = torch.softmax(disp_match_4x * disp_var_4x, dim=1)
 
         # cost_weights_4x: 1 x 5 x 48 x 120 x 160, cost volume after VAP, V_p_i_d
-        cost_weights_4x = self.propagation_prob(cost_weights_4x)
+        cost_weights_4x = self.propagation_prob(cost_weights_4x.unsqueeze(1))
         cost_weights_4x = cost_weights_4x * disp_match_4x.unsqueeze(2)
         # cost_weights_4x: 1 x 48 x 120 x 160, cost volume after VAP, V_p_i_d
         cost_weights_4x = torch.sum(cost_weights_4x, dim=1)
@@ -655,7 +655,7 @@ class FastACVNetSimple(nn.Module):
             concat_volume = self.concat_volume_generator(
                 concat_features_left, concat_features_right, disp_vals_topk_4x
             )
-            concat_volume = disp_probs_topk_4x * concat_volume
+            concat_volume = disp_probs_topk_4x.unsqueeze(1) * concat_volume
             concat_volume = self.concat_stem(concat_volume)
             concat_volume = self.concat_feature_att_4(concat_volume, features_left[0])
             seman_weights_4x = self.hourglass(concat_volume, features_left).squeeze(1)
