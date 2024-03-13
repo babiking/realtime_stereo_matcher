@@ -35,16 +35,10 @@
     "model": {
         "type": "MobileStereoNetV6",
         "parameters": {
-            "in_dim": 3,
-            "stem_hidden_dims": [
-                32,
-                48,
-                48
-            ],
-            "stem_out_dim": 32,
             "max_disp": 192,
-            "num_cost_groups": 12,
-            "use_concat_volume": true
+            "use_concat_volume": true,
+            "use_topk_sort": true,
+            "use_warp_score": true
         }
     },
     "data": {

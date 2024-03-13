@@ -1,17 +1,16 @@
 from __future__ import print_function
-import math
-import numpy as np
-import timm
 import torch
 import torch.nn as nn
 import torch.utils.data
 import torch.nn.functional as F
-from others.fast_acv_net.submodule import Conv2x, BasicConv
+from others.fast_acv_net.submodule import *
+import math
+import timm
 
 
-class ModuleWithInit(nn.Module):
+class SubModule(nn.Module):
     def __init__(self):
-        super(ModuleWithInit, self).__init__()
+        super(SubModule, self).__init__()
 
     def weight_init(self):
         for m in self.modules():
@@ -34,34 +33,24 @@ class ModuleWithInit(nn.Module):
                 m.bias.data.zero_()
 
 
-class MobileNetV2(ModuleWithInit):
-    def __init__(self, *args, **kwargs):
-        super(MobileNetV2, self).__init__(*args, **kwargs)
+class Feature(SubModule):
+    def __init__(self):
+        super(Feature, self).__init__()
+        pretrained = True
         model = timm.create_model(
-            "mobilenetv2_100", pretrained=True, features_only=True
+            "mobilenetv2_100", pretrained=pretrained, features_only=True
         )
-        self.layer_idxs = [1, 2, 3, 5, 6]
-        self.hidden_dims = [16, 24, 32, 96, 160]
-
-        self.down_factor = 5
-
+        layers = [1, 2, 3, 5, 6]
+        chans = [16, 24, 32, 96, 160]
         self.conv_stem = model.conv_stem
         self.bn1 = model.bn1
-        self.act1 = nn.ReLU()
+        self.act1 = nn.ReLU()  # model.act1
 
-        self.block0 = torch.nn.Sequential(*model.blocks[0 : self.layer_idxs[0]])
-        self.block1 = torch.nn.Sequential(
-            *model.blocks[self.layer_idxs[0] : self.layer_idxs[1]]
-        )
-        self.block2 = torch.nn.Sequential(
-            *model.blocks[self.layer_idxs[1] : self.layer_idxs[2]]
-        )
-        self.block3 = torch.nn.Sequential(
-            *model.blocks[self.layer_idxs[2] : self.layer_idxs[3]]
-        )
-        self.block4 = torch.nn.Sequential(
-            *model.blocks[self.layer_idxs[3] : self.layer_idxs[4]]
-        )
+        self.block0 = torch.nn.Sequential(*model.blocks[0 : layers[0]])
+        self.block1 = torch.nn.Sequential(*model.blocks[layers[0] : layers[1]])
+        self.block2 = torch.nn.Sequential(*model.blocks[layers[1] : layers[2]])
+        self.block3 = torch.nn.Sequential(*model.blocks[layers[2] : layers[3]])
+        self.block4 = torch.nn.Sequential(*model.blocks[layers[3] : layers[4]])
 
     def forward(self, x):
         x = self.act1(self.bn1(self.conv_stem(x)))
@@ -73,245 +62,307 @@ class MobileNetV2(ModuleWithInit):
         return [x4, x8, x16, x32]
 
 
-class FeatureUpsample(ModuleWithInit):
-    def __init__(self, hidden_dims=[24, 32, 96, 160], *args, **kwargs):
-        super(FeatureUpsample, self).__init__(*args, **kwargs)
-        self.hidden_dims = hidden_dims
-
-        self.deconv_layers = nn.ModuleList()
-        for i in range(len(hidden_dims) - 1):
-            j = len(hidden_dims) - 1 - i
-
-            self.deconv_layers.append(
-                Conv2x(
-                    hidden_dims[j] * (1 if i == 0 else 2),
-                    hidden_dims[j - 1],
-                    deconv=True,
-                    concat=True,
-                )
-            )
-
-        self.conv_out = BasicConv(
-            hidden_dims[0] * 2, hidden_dims[0] * 2, kernel_size=3, stride=1, padding=1
+class FeatUp(SubModule):
+    def __init__(self):
+        super(FeatUp, self).__init__()
+        chans = [16, 24, 32, 96, 160]
+        self.deconv32_16 = Conv2x(chans[4], chans[3], deconv=True, concat=True)
+        self.deconv16_8 = Conv2x(chans[3] * 2, chans[2], deconv=True, concat=True)
+        self.deconv8_4 = Conv2x(chans[2] * 2, chans[1], deconv=True, concat=True)
+        self.conv4 = BasicConv(
+            chans[1] * 2, chans[1] * 2, kernel_size=3, stride=1, padding=1
         )
 
         self.weight_init()
 
-    def forward(self, x_pyramid):
-        for i in range(len(x_pyramid) - 1):
-            j = len(x_pyramid) - 1 - i
+    def forward(self, featL, featR=None):
+        x4, x8, x16, x32 = featL
+        y4, y8, y16, y32 = featR
 
-            # e.g. MobileNetV2-100 -> [x4, x8, x16, x32]
-            #   x16 = DECONV[0](x32, x16)
-            #   x8  = DECONV[1](x16, x8)
-            #   x4  = DECONV[2](x8, x4)
-            #   x4  = CONV_OUT(x4)
-            x_pyramid[j - 1] = self.deconv_layers[i](x_pyramid[j], x_pyramid[j - 1])
+        x16 = self.deconv32_16(x32, x16)
+        y16 = self.deconv32_16(y32, y16)
 
-        x_pyramid[0] = self.conv_out(x_pyramid[0])
-        return x_pyramid
+        x8 = self.deconv16_8(x16, x8)
+        y8 = self.deconv16_8(y16, y8)
+
+        x4 = self.deconv8_4(x8, x4)
+        y4 = self.deconv8_4(y8, y4)
+
+        x4 = self.conv4(x4)
+        y4 = self.conv4(y4)
+
+        return [x4, x8, x16, x32], [y4, y8, y16, y32]
 
 
-class FeatureStem(ModuleWithInit):
-    def __init__(
-        self, in_dim=3, stem_hidden_dims=[32, 48, 48], stem_out_dim=32, *args, **kwargs
-    ):
-        super(FeatureStem, self).__init__(*args, **kwargs)
-        self.in_dim = in_dim
-        self.stem_hidden_dims = stem_hidden_dims
-        self.stem_out_dim = stem_out_dim
+class channelAtt(SubModule):
+    def __init__(self, cv_chan, im_chan):
+        super(channelAtt, self).__init__()
 
-        self.conv_layers = nn.ModuleList([])
-        for i in range(len(stem_hidden_dims)):
-            self.conv_layers.append(
-                nn.Sequential(
-                    BasicConv(
-                        in_dim if i == 0 else stem_hidden_dims[i - 1],
-                        stem_hidden_dims[i],
-                        kernel_size=3,
-                        stride=2,
-                        padding=1,
-                    ),
-                    nn.Conv2d(
-                        stem_hidden_dims[i],
-                        stem_hidden_dims[i]
-                        if i != len(stem_hidden_dims) - 1
-                        else stem_out_dim,
-                        3,
-                        1,
-                        1,
-                        bias=False,
-                    ),
-                    nn.BatchNorm2d(
-                        stem_hidden_dims[i]
-                        if i != len(stem_hidden_dims) - 1
-                        else stem_out_dim
-                    ),
-                    nn.ReLU(),
-                )
-            )
+        self.im_att = nn.Sequential(
+            BasicConv(im_chan, im_chan // 2, kernel_size=1, stride=1, padding=0),
+            nn.Conv2d(im_chan // 2, cv_chan, 1),
+        )
 
         self.weight_init()
 
-    def forward(self, x):
-        x_pyramid = []
-
-        for conv_layer in self.conv_layers:
-            x = conv_layer(x)
-
-            x_pyramid.append(x)
-        return x_pyramid
+    def forward(self, cv, im):
+        channel_att = self.im_att(im).unsqueeze(2)
+        cv = torch.sigmoid(channel_att) * cv
+        return cv
 
 
-class MobileV2FeatureExtract(nn.Module):
-    def __init__(
-        self, in_dim=3, stem_hidden_dims=[32, 48, 48], stem_out_dim=32, *args, **kwargs
-    ):
-        super(MobileV2FeatureExtract, self).__init__(*args, **kwargs)
+class hourglass(nn.Module):
+    def __init__(self, in_channels):
+        super(hourglass, self).__init__()
 
-        self.backbone = MobileNetV2()
-        self.backbone_hidden_dims = self.backbone.hidden_dims
-        self.upsample = FeatureUpsample(hidden_dims=self.backbone_hidden_dims[1:])
-
-        self.stem_hidden_dims = stem_hidden_dims
-        self.stem_out_dim = stem_out_dim
-        self.stem = FeatureStem(
-            in_dim=in_dim, stem_hidden_dims=stem_hidden_dims, stem_out_dim=stem_out_dim
+        self.conv1 = nn.Sequential(
+            BasicConv(
+                in_channels,
+                in_channels * 2,
+                is_3d=True,
+                bn=True,
+                relu=True,
+                kernel_size=3,
+                padding=1,
+                stride=2,
+                dilation=1,
+            ),
+            BasicConv(
+                in_channels * 2,
+                in_channels * 2,
+                is_3d=True,
+                bn=True,
+                relu=True,
+                kernel_size=3,
+                padding=1,
+                stride=1,
+                dilation=1,
+            ),
         )
 
-    def forward(self, x):
-        # mobile_fmaps = [x4, x8, x16, x32]
-        mobile_fmaps = self.upsample(self.backbone(x))
-
-        # stem_fmaps = [x2, x4, x8]
-        stem_fmaps = self.stem(x)
-
-        mobile_fmaps[0] = torch.concat((mobile_fmaps[0], stem_fmaps[1]), dim=1)
-        mobile_fmaps[1] = torch.concat((mobile_fmaps[1], stem_fmaps[2]), dim=1)
-        return mobile_fmaps
-
-
-class Warp1DOp(nn.Module):
-    def __init__(
-        self, mode="bilinear", padding_mode="zeros", align_corners=True, *args, **kwargs
-    ) -> None:
-        super().__init__(*args, **kwargs)
-
-        self.mode = mode
-        self.padding_mode = padding_mode
-        self.align_corners = align_corners
-
-    def get_random_inputs(self, n=1, c=32, h=30, w=40):
-        image = torch.randn(size=(n, c, h, w), dtype=torch.float32)
-        disparity = torch.randn(size=(n, 1, h, w), dtype=torch.float32) * w
-        return (image, disparity)
-
-    def get_output_number(self):
-        return 1
-
-    def warp_by_flow_map(self, img, flow):
-        """
-        warp image according to stereo flow map (i.e. disparity map)
-
-        Args:
-            [1] img, N x C x H x W, original image or feature map
-            [2] flow,  N x 1 x H x W or N x 2 x H x W, flow map
-
-        Return:
-            [1] warped, N x C x H x W, warped image or feature map
-        """
-        n, c, h, w = flow.shape
-
-        assert c == 1 or c == 2, f"invalid flow map dimension 1 or 2 ({c})!"
-
-        grid_y, grid_x = torch.meshgrid(
-            torch.arange(h, device=img.device, dtype=img.dtype),
-            torch.arange(w, device=img.device, dtype=img.dtype),
-            indexing="ij",
+        self.conv2 = nn.Sequential(
+            BasicConv(
+                in_channels * 2,
+                in_channels * 4,
+                is_3d=True,
+                bn=True,
+                relu=True,
+                kernel_size=3,
+                padding=1,
+                stride=2,
+                dilation=1,
+            ),
+            BasicConv(
+                in_channels * 4,
+                in_channels * 4,
+                is_3d=True,
+                bn=True,
+                relu=True,
+                kernel_size=3,
+                padding=1,
+                stride=1,
+                dilation=1,
+            ),
         )
 
-        grid_x = grid_x.view([1, 1, h, w]) - flow[:, 0, :, :].view([n, 1, h, w])
-        grid_x = grid_x.permute([0, 2, 3, 1])
-
-        if c == 2:
-            grid_y = grid_y.view([1, 1, h, w]) - flow[:, 1, :, :].view([n, 1, h, w])
-            grid_y = grid_y.permute([0, 2, 3, 1])
-        else:
-            grid_y = grid_y.view([1, h, w, 1]).repeat(n, 1, 1, 1)
-
-        grid_x = 2.0 * grid_x / (w - 1.0) - 1.0
-        grid_y = 2.0 * grid_y / (h - 1.0) - 1.0
-        grid_map = torch.concatenate((grid_x, grid_y), dim=-1)
-
-        warped = F.grid_sample(
-            img,
-            grid_map,
-            mode=self.mode,
-            padding_mode=self.padding_mode,
-            align_corners=self.align_corners,
+        self.conv2_up = BasicConv(
+            in_channels * 4,
+            in_channels * 2,
+            deconv=True,
+            is_3d=True,
+            bn=True,
+            relu=True,
+            kernel_size=(4, 4, 4),
+            padding=(1, 1, 1),
+            stride=(2, 2, 2),
         )
-        return warped
 
-    def process_grid_coordinates(self, pixs, width):
-        # if self.align_corners:
-        #     pixels = (grids + 1.0) * (0.5 * (width - 1))
-        # else:
-        #     pixels = (grids + 1.0) * (0.5 * width) - 0.5
-        assert self.align_corners
+        self.conv1_up = BasicConv(
+            in_channels * 2,
+            1,
+            deconv=True,
+            is_3d=True,
+            bn=False,
+            relu=False,
+            kernel_size=(4, 4, 4),
+            padding=(1, 1, 1),
+            stride=(2, 2, 2),
+        )
 
-        if self.padding_mode == "border":
-            pixs = torch.clip(pixs, 0, width - 1)
-        elif self.padding_mode == "zeros":
-            pixs = torch.clip(pixs, -1, width) + 1
-        elif self.padding_mode == "reflection":
-            if self.align_corners:
-                pixs = (width - 1) - torch.abs(
-                    pixs % (2 * max(width - 1, 1)) - (width - 1)
-                )
-            else:
-                pixs = width - torch.abs((pixs + 0.5) % (2 * width) - width) - 0.5
-                pixs = torch.clip(pixs, 0, width - 1)
-        return pixs
+        self.agg = nn.Sequential(
+            BasicConv(
+                in_channels * 4,
+                in_channels * 2,
+                is_3d=True,
+                kernel_size=1,
+                padding=0,
+                stride=1,
+            ),
+            BasicConv(
+                in_channels * 2,
+                in_channels * 2,
+                is_3d=True,
+                kernel_size=3,
+                padding=1,
+                stride=1,
+            ),
+            BasicConv(
+                in_channels * 2,
+                in_channels * 2,
+                is_3d=True,
+                kernel_size=3,
+                padding=1,
+                stride=1,
+            ),
+        )
 
-    def warp_by_disparity_map(self, img, disp):
-        """
-        reference: https://github.com/AlexanderLutsenko/nobuco/blob/aa4745e6abb1124d90f7d3ace6d282f923f08a40/nobuco/node_converters/grid_sampling.py#L38
-        """
-        n, _, h, w = img.shape
+        self.feature_att_8 = channelAtt(in_channels * 2, 96)
+        self.feature_att_16 = channelAtt(in_channels * 4, 192)
+        self.feature_att_up_8 = channelAtt(in_channels * 2, 96)
 
-        x = torch.arange(w, device=img.device, dtype=img.dtype)
-        x = x[None, None, None, :].repeat([n, 1, h, 1])
-        x = x - disp
+    def forward(self, x, imgs):
+        conv1 = self.conv1(x)
+        conv1 = self.feature_att_8(conv1, imgs[1])
 
-        x = self.process_grid_coordinates(x, w)
+        conv2 = self.conv2(conv1)
+        conv2 = self.feature_att_16(conv2, imgs[2])
 
-        if self.padding_mode == "zeros":
-            x = F.pad(x, (1, 1, 0, 0), mode="constant", value=0)
-            img = F.pad(img, (1, 1, 0, 0), mode="constant", value=0)
+        conv2_up = self.conv2_up(conv2)
+        conv1 = torch.cat((conv2_up, conv1), dim=1)
+        conv1 = self.agg(conv1)
+        conv1 = self.feature_att_up_8(conv1, imgs[1])
 
-        if self.mode == "bilinear":
-            x0 = torch.floor(x).type(dtype=torch.int64)
-            x1 = torch.ceil(x).type(dtype=torch.int64)
+        conv = self.conv1_up(conv1)
 
-            dx = x - x0
+        return conv
 
-            v_x0 = torch.gather(img, dim=-1, index=x0.expand_as(img))
-            v_x1 = torch.gather(img, dim=-1, index=x1.expand_as(img))
 
-            warped = (1.0 - dx) * v_x0 + dx * v_x1
+class hourglass_att(nn.Module):
+    def __init__(self, in_channels):
+        super(hourglass_att, self).__init__()
 
-        elif self.mode == "nearest":
-            x0 = torch.round(x).type(dtype=torch.int64)
-            warped = torch.gather(img, dim=-1, index=x0.expand_as(img))
-        else:
-            raise NotImplementedError
+        self.conv1 = nn.Sequential(
+            BasicConv(
+                in_channels,
+                in_channels * 2,
+                is_3d=True,
+                bn=True,
+                relu=True,
+                kernel_size=3,
+                padding=1,
+                stride=2,
+                dilation=1,
+            ),
+            BasicConv(
+                in_channels * 2,
+                in_channels * 2,
+                is_3d=True,
+                bn=True,
+                relu=True,
+                kernel_size=3,
+                padding=1,
+                stride=1,
+                dilation=1,
+            ),
+        )
 
-        if self.padding_mode == "zeros":
-            warped = warped[:, :, :, 1:-1]
-        return warped
+        self.conv2 = nn.Sequential(
+            BasicConv(
+                in_channels * 2,
+                in_channels * 4,
+                is_3d=True,
+                bn=True,
+                relu=True,
+                kernel_size=3,
+                padding=1,
+                stride=2,
+                dilation=1,
+            ),
+            BasicConv(
+                in_channels * 4,
+                in_channels * 4,
+                is_3d=True,
+                bn=True,
+                relu=True,
+                kernel_size=3,
+                padding=1,
+                stride=1,
+                dilation=1,
+            ),
+        )
 
-    def forward(self, img, disp):
-        return self.warp_by_disparity_map(img, disp)
+        self.conv2_up = BasicConv(
+            in_channels * 4,
+            in_channels * 2,
+            deconv=True,
+            is_3d=True,
+            bn=True,
+            relu=True,
+            kernel_size=(4, 4, 4),
+            padding=(1, 1, 1),
+            stride=(2, 2, 2),
+        )
+
+        self.conv1_up_ = BasicConv(
+            in_channels * 2,
+            in_channels,
+            deconv=True,
+            is_3d=True,
+            bn=True,
+            relu=True,
+            kernel_size=(4, 4, 4),
+            padding=(1, 1, 1),
+            stride=(2, 2, 2),
+        )
+        self.conv_final = nn.Conv3d(in_channels, 1, 3, 1, 1, bias=False)
+
+        self.agg = nn.Sequential(
+            BasicConv(
+                in_channels * 4,
+                in_channels * 2,
+                is_3d=True,
+                kernel_size=1,
+                padding=0,
+                stride=1,
+            ),
+            BasicConv(
+                in_channels * 2,
+                in_channels * 2,
+                is_3d=True,
+                kernel_size=3,
+                padding=1,
+                stride=1,
+            ),
+            BasicConv(
+                in_channels * 2,
+                in_channels * 2,
+                is_3d=True,
+                kernel_size=3,
+                padding=1,
+                stride=1,
+            ),
+        )
+
+        self.feature_att_16 = channelAtt(in_channels * 2, 192)
+        self.feature_att_32 = channelAtt(in_channels * 4, 160)
+        self.feature_att_up_16 = channelAtt(in_channels * 2, 192)
+
+    def forward(self, x, imgs):
+        conv1 = self.conv1(x)
+        conv1 = self.feature_att_16(conv1, imgs[2])
+
+        conv2 = self.conv2(conv1)
+        conv2 = self.feature_att_32(conv2, imgs[3])
+
+        conv2_up = self.conv2_up(conv2)
+        conv1 = torch.cat((conv2_up, conv1), dim=1)
+        conv1 = self.agg(conv1)
+        conv1 = self.feature_att_up_16(conv1, imgs[2])
+
+        conv = self.conv1_up_(conv1)
+        conv = self.conv_final(conv)
+
+        return conv
 
 
 class GroupwiseCostVolume3D(nn.Module):
@@ -341,7 +392,12 @@ class GroupwiseCostVolume3D(nn.Module):
         ch_per_group = c // self.num_cost_groups
         l_fmap = l_fmap.view([n, self.num_cost_groups, ch_per_group, h, w])
         r_fmap = r_fmap.view([n, self.num_cost_groups, ch_per_group, h, w])
-        cost_item = (l_fmap * r_fmap).mean(dim=2)
+        cost_item = (
+            l_fmap
+            / (torch.norm(l_fmap, p=2, dim=2).unsqueeze(2) + 1e-05)
+            * r_fmap
+            / (torch.norm(r_fmap, p=2, dim=2).unsqueeze(2) + 1e-05)
+        ).mean(dim=2)
         return cost_item
 
     def make_cost_volume_naive(self, l_fmap, r_fmap):
@@ -351,7 +407,7 @@ class GroupwiseCostVolume3D(nn.Module):
         # cost_volume: 1 x 32 x 24 x 60 x 80
         n, c, h, w = l_fmap.shape
 
-        cost_volume = torch.ones(
+        cost_volume = torch.zeros(
             size=[n, self.num_cost_groups, self.max_disp, h, w],
             dtype=l_fmap.dtype,
             device=l_fmap.device,
@@ -392,12 +448,12 @@ class GroupwiseCostVolume3D(nn.Module):
                 cost_item = self.get_cost_item(x, y)
 
                 cost_volume.append(
-                    F.pad(cost_item, [d, 0, 0, 0], value=1.0).unsqueeze(2)
+                    F.pad(cost_item, [d, 0, 0, 0], value=0.0).unsqueeze(2)
                 )
         cost_volume = torch.concat(cost_volume, dim=2)
         return cost_volume
 
-    def forward(self, l_fmap, r_fmap, use_naive=True):
+    def forward(self, l_fmap, r_fmap, use_naive):
         return (
             self.make_cost_volume_naive(l_fmap, r_fmap)
             if use_naive
@@ -405,269 +461,237 @@ class GroupwiseCostVolume3D(nn.Module):
         )
 
 
-class CostAttention3D(ModuleWithInit):
-    def __init__(self, fmap_dim, cost_dim, hidden_dim=None, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-
-        self.fmap_dim = fmap_dim
-        self.cost_dim = cost_dim
-        self.hidden_dim = hidden_dim if hidden_dim is not None else (fmap_dim // 2)
-
-        self.fmap_att = nn.Sequential(
-            BasicConv(fmap_dim, self.hidden_dim, kernel_size=1, stride=1, padding=0),
-            nn.Conv2d(self.hidden_dim, cost_dim, 1),
-        )
-
-        self.weight_init()
-
-    def forward(self, cost_volume, l_fmap):
-        l_fmap_att = self.fmap_att(l_fmap).unsqueeze(2)
-        return torch.sigmoid(l_fmap_att) * cost_volume
-
-
-class CostHourglassAttention3D(ModuleWithInit):
-    def __init__(self, cost_dim, fmap_dims):
-        super(CostHourglassAttention3D, self).__init__()
-
-        self.cost_dim = cost_dim
-        # fmap_dims = [x4, x8, x16, x32]
-        self.fmap_dims = fmap_dims
-        self.conv1 = nn.Sequential(
-            BasicConv(
-                cost_dim,
-                cost_dim * 2,
-                is_3d=True,
-                bn=True,
-                relu=True,
-                kernel_size=3,
-                padding=1,
-                stride=2,
-                dilation=1,
-            ),
-            BasicConv(
-                cost_dim * 2,
-                cost_dim * 2,
-                is_3d=True,
-                bn=True,
-                relu=True,
-                kernel_size=3,
-                padding=1,
-                stride=1,
-                dilation=1,
-            ),
-        )
-
-        self.conv2 = nn.Sequential(
-            BasicConv(
-                cost_dim * 2,
-                cost_dim * 4,
-                is_3d=True,
-                bn=True,
-                relu=True,
-                kernel_size=3,
-                padding=1,
-                stride=2,
-                dilation=1,
-            ),
-            BasicConv(
-                cost_dim * 4,
-                cost_dim * 4,
-                is_3d=True,
-                bn=True,
-                relu=True,
-                kernel_size=3,
-                padding=1,
-                stride=1,
-                dilation=1,
-            ),
-        )
-
-        self.conv2_up = BasicConv(
-            cost_dim * 4,
-            cost_dim * 2,
-            deconv=True,
-            is_3d=True,
-            bn=True,
-            relu=True,
-            kernel_size=(4, 4, 4),
-            padding=(1, 1, 1),
-            stride=(2, 2, 2),
-        )
-
-        self.conv1_up = BasicConv(
-            cost_dim * 2,
-            cost_dim,
-            deconv=True,
-            is_3d=True,
-            bn=True,
-            relu=True,
-            kernel_size=(4, 4, 4),
-            padding=(1, 1, 1),
-            stride=(2, 2, 2),
-        )
-        self.conv_out = nn.Conv3d(cost_dim, 1, 3, 1, 1, bias=False)
-
-        self.aggregate = nn.Sequential(
-            BasicConv(
-                cost_dim * 4,
-                cost_dim * 2,
-                is_3d=True,
-                kernel_size=1,
-                padding=0,
-                stride=1,
-            ),
-            BasicConv(
-                cost_dim * 2,
-                cost_dim * 2,
-                is_3d=True,
-                kernel_size=3,
-                padding=1,
-                stride=1,
-            ),
-            BasicConv(
-                cost_dim * 2,
-                cost_dim * 2,
-                is_3d=True,
-                kernel_size=3,
-                padding=1,
-                stride=1,
-            ),
-        )
-
-        self.cost_att_16x = CostAttention3D(
-            cost_dim=cost_dim * 2, fmap_dim=fmap_dims[2]
-        )
-        self.cost_att_32x = CostAttention3D(
-            cost_dim=cost_dim * 4, fmap_dim=fmap_dims[3]
-        )
-        self.cost_att_up_16x = CostAttention3D(
-            cost_dim=cost_dim * 2, fmap_dim=fmap_dims[2]
-        )
-
-    def forward(self, cost_volume, l_fmaps):
-        _, _, l_fmap_16x, l_fmap_32x = l_fmaps
-
-        conv1 = self.conv1(cost_volume)
-        conv1 = self.cost_att_16x(conv1, l_fmap_16x)
-
-        conv2 = self.conv2(conv1)
-        conv2 = self.cost_att_32x(conv2, l_fmap_32x)
-
-        conv2_up = self.conv2_up(conv2)
-
-        conv2_cat = torch.cat((conv2_up, conv1), dim=1)
-        conv2_cat = self.aggregate(conv2_cat)
-        conv2_cat = self.cost_att_up_16x(conv2_cat, l_fmap_16x)
-
-        conv1_up = self.conv1_up(conv2_cat)
-        cost_weights = self.conv_out(conv1_up)
-        return cost_weights
-
-
-class CostFilter3D(ModuleWithInit):
-    def __init__(self, max_disp, cost_dim, fmap_dims, *args, **kwargs):
-        super(CostFilter3D, self).__init__()
-
+class MobileStereoNetV6(nn.Module):
+    def __init__(self, max_disp, use_concat_volume, use_topk_sort, use_warp_score):
+        super(MobileStereoNetV6, self).__init__()
         self.max_disp = max_disp
-        self.cost_dim = cost_dim
-        self.fmap_dims = fmap_dims
-        self.cost_att_8x = CostAttention3D(fmap_dim=fmap_dims[1], cost_dim=cost_dim)
+        self.use_concat_volume = use_concat_volume
+        self.use_topk_sort = use_topk_sort
+        self.use_warp_score = use_warp_score
+        self.feature = Feature()
+        self.feature_up = FeatUp()
+        self.gamma = nn.Parameter(torch.zeros(1))
+        self.beta = nn.Parameter(2 * torch.ones(1))
 
-        self.conv_in = nn.Conv3d(
-            cost_dim,
-            cost_dim,
+        self.patch = nn.Conv3d(
+            12,
+            12,
             kernel_size=(1, 3, 3),
             stride=1,
             dilation=1,
-            groups=cost_dim,
+            groups=12,
             padding=(0, 1, 1),
             bias=False,
         )
 
-        self.cost_hourglass_att_8x = CostHourglassAttention3D(
-            cost_dim=cost_dim, fmap_dims=fmap_dims
+        self.stem_2 = nn.Sequential(
+            BasicConv(3, 32, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(32, 32, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+        )
+        self.stem_4 = nn.Sequential(
+            BasicConv(32, 48, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(48, 48, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(48),
+            nn.ReLU(),
         )
 
-        self.weight_init()
+        self.stem_8 = nn.Sequential(
+            BasicConv(48, 48, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(48, 32, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+        )
 
-    def forward(self, cost_volume_8x, l_fmaps):
-        cost_volume_8x = self.conv_in(cost_volume_8x)
+        self.spx = nn.Sequential(
+            nn.ConvTranspose2d(2 * 32, 9, kernel_size=4, stride=2, padding=1),
+        )
+        self.spx_2 = Conv2x(24, 32, True)
+        self.spx_4 = nn.Sequential(
+            BasicConv(96, 24, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(24, 24, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(24),
+            nn.ReLU(),
+        )
+
+        self.corr_feature_att_8 = channelAtt(12, 96)
+
+        if self.use_concat_volume:
+            self.concat_feature = nn.Sequential(
+                BasicConv(96, 32, kernel_size=3, stride=1, padding=1),
+                nn.Conv2d(32, 16, 3, 1, 1, bias=False),
+            )
+            self.concat_feature_att_4 = channelAtt(16, 96)
+            self.hourglass = hourglass(16)
+            self.concat_stem = BasicConv(
+                32, 16, is_3d=True, kernel_size=3, stride=1, padding=1
+            )
+
+        self.hourglass_att = hourglass_att(12)
+        self.propagation = Propagation()
+        self.propagation_prob = Propagation_prob()
+
+        self.cost_builder = GroupwiseCostVolume3D(
+            hidden_dim=96, max_disp=max_disp // 8, num_cost_groups=12
+        )
+
+    def concat_volume_generator(self, left_input, right_input, disparity_samples):
+        right_feature_map, left_feature_map = SpatialTransformer_grid(
+            left_input, right_input, disparity_samples
+        )
+        concat_volume = torch.cat((left_feature_map, right_feature_map), dim=1)
+        return concat_volume
+
+    def forward(self, left, right, is_train=True):
+        features_left = self.feature(left)
+        features_right = self.feature(right)
+        features_left, features_right = self.feature_up(features_left, features_right)
+
+        stem_2x = self.stem_2(left)
+        stem_4x = self.stem_4(stem_2x)
+        stem_8x = self.stem_8(stem_4x)
+
+        stem_2y = self.stem_2(right)
+        stem_4y = self.stem_4(stem_2y)
+        stem_8y = self.stem_8(stem_4y)
+
+        features_left[0] = torch.cat((features_left[0], stem_4x), 1)
+        features_right[0] = torch.cat((features_right[0], stem_4y), 1)
+
+        features_left[1] = torch.cat((features_left[1], stem_8x), 1)
+        features_right[1] = torch.cat((features_right[1], stem_8y), 1)
+
+        # spx_pred: used from context upsample 4x
+        xspx = self.spx_4(features_left[0])
+        xspx = self.spx_2(xspx, stem_2x)
+        spx_pred = self.spx(xspx)
+        spx_pred = F.softmax(spx_pred, 1)
+
+        # cost_volume_8x: 1 x 12 x 24 x 64 x 80, 8x
+        cost_volume_8x = self.cost_builder(
+            features_left[1], features_right[1], use_naive=is_train
+        )
+        cost_volume_8x = self.patch(cost_volume_8x)
 
         # cost_volume_8x: 1 x 12 x 24 x 64 x 80, 8x, left image feature guided attention weights
-        cost_volume_8x = self.cost_att_8x(cost_volume_8x, l_fmaps[1])
+        cost_volume_8x = self.corr_feature_att_8(cost_volume_8x, features_left[1])
         # cost_weights_8x: 1 x 1 x 24 x 64 x 80, 8x, left image features guided hourglass filtering
-        cost_weights_8x = self.cost_hourglass_att_8x(cost_volume_8x, l_fmaps)
+        cost_weights_8x = self.hourglass_att(cost_volume_8x, features_left)
 
         # cost_weights_4x: 1 x 1 x 48 x 120 x 240, 4x, cost volume, V_init
         cost_weights_4x = F.interpolate(
             cost_weights_8x,
-            [self.max_disp // 4, l_fmaps[0].shape[2], l_fmaps[0].shape[3]],
+            [self.max_disp // 4, left.shape[2] // 4, left.shape[3] // 4],
             mode="trilinear",
         )
-        return cost_weights_4x
 
-
-class MobileStereoNetV6(nn.Module):
-    def __init__(
-        self,
-        in_dim=3,
-        stem_hidden_dims=[32, 48, 48],
-        stem_out_dim=32,
-        max_disp=192,
-        num_cost_groups=12,
-        use_concat_volume=True,
-    ):
-        super(MobileStereoNetV6, self).__init__()
-        self.max_disp = max_disp
-        self.num_cost_groups = num_cost_groups
-        self.use_concat_volume = use_concat_volume
-        self.feature_extractor = MobileV2FeatureExtract(
-            in_dim=in_dim, stem_hidden_dims=stem_hidden_dims, stem_out_dim=stem_out_dim
+        # disp_probs_4x: 1 x 48 x 120 x 160, D_init
+        disp_probs_4x = F.softmax(cost_weights_4x.squeeze(1), dim=1)
+        # disp_init_4x: 1 x 1 x 120 x 160, D_init
+        disp_init_4x = disparity_regression(disp_probs_4x, self.max_disp // 4)
+        # disp_var_4x: 1 x 1 x 120 x 160, U_i, confidence uncertainty,
+        disp_var_4x = disparity_variance(
+            disp_probs_4x, self.max_disp // 4, disp_init_4x
         )
+        disp_var_4x = torch.sigmoid(self.beta + self.gamma * disp_var_4x)
+        # disp_var_4x_m: 1 x 5 x 120 x 160
+        disp_var_4x = self.propagation(disp_var_4x)
 
-        # concat with stem at 4x and 8x
-        self.fmap_dims = self.feature_extractor.upsample.hidden_dims
-        self.fmap_dims = [
-            d * (1 if i == len(self.fmap_dims) - 1 else 2)
-            for i, d in enumerate(self.fmap_dims)
-        ]
-        self.fmap_dims[0] += stem_hidden_dims[1]
-        self.fmap_dims[1] += stem_out_dim
+        if self.use_warp_score:
+            # disp_init_4x_m: 1 x 5 x 120 x 160
+            disp_init_4x = self.propagation(disp_init_4x)
+            # left_feature_x4: 1 x 96 x 5 x 120 x 160
+            right_feature_x4, left_feature_x4 = SpatialTransformer_grid(
+                stem_4x, stem_4y, disp_init_4x
+            )
+            # disp_match_4x_m: 1 x 5 x 120 x 160
+            disp_match_4x = (left_feature_x4 * right_feature_x4).mean(dim=1)
+        else:
+            disp_match_4x = 1.0
 
-        self.warp_head = Warp1DOp(
-            mode="bilinear", padding_mode="border", align_corners=True
-        )
+        # disp_match_4x: 1 x 5 x 120 x 160, cross shape propagation weights, W_m_i
+        disp_match_4x = torch.softmax(disp_match_4x * disp_var_4x, dim=1)
 
-        self.cost_builder = GroupwiseCostVolume3D(
-            hidden_dim=self.feature_extractor.backbone_hidden_dims[2],
-            max_disp=self.max_disp // 8,
-            num_cost_groups=num_cost_groups,
-        )
+        # cost_weights_4x: 1 x 5 x 48 x 120 x 160, cost volume after VAP, V_p_i_d
+        cost_weights_4x = self.propagation_prob(cost_weights_4x)
+        cost_weights_4x = cost_weights_4x * disp_match_4x.unsqueeze(2)
+        # cost_weights_4x: 1 x 48 x 120 x 160, cost volume after VAP, V_p_i_d
+        cost_weights_4x = torch.sum(cost_weights_4x, dim=1)
 
-        self.cost_filter = CostFilter3D(
-            max_disp=self.max_disp,
-            cost_dim=self.num_cost_groups,
-            fmap_dims=self.fmap_dims,
-        )
+        # disp_probs_4x: 1 x 48 x 120 x 160, disparity probability
+        disp_probs_4x = F.softmax(cost_weights_4x, dim=1)
 
-    def concat_volume_generator(self, l_fmap, r_fmap, l_disp):
-        r_fmap_warp = self.warp_head(r_fmap, l_disp)
-        concat_volume = torch.cat((l_fmap, r_fmap_warp), dim=1)
-        return concat_volume
+        if self.use_topk_sort:
+            _, ind = disp_probs_4x.sort(1, True)
+            k = self.max_disp // 4 // 2
+            ind_k = ind[:, :k]
+            ind_k = ind_k.sort(1, False)[0]
+            # disp_probs_topk_4x: 1 x 24 x 120 x 160, disparity top-k probability
+            disp_probs_topk_4x = torch.gather(disp_probs_4x, 1, ind_k)
+            # disp_vals_topk_4x: 1 x 24 x 120 x 160, disparity top-k value
+            disp_vals_topk_4x = ind_k.float()
 
-    def forward(self, l_img, r_img, is_train=True):
-        # l_fmaps = [x4, x8, x16, x32]
-        l_fmaps = self.feature_extractor(l_img)
-        r_fmaps = self.feature_extractor(r_img)
+        if self.use_concat_volume:
+            if not self.use_topk_sort:
+                disp_probs_topk_4x = disp_probs_4x
+                disp_vals_topk_4x = torch.arange(
+                    0,
+                    self.max_disp // 4,
+                    dtype=disp_probs_4x.dtype,
+                    device=disp_probs_4x.device,
+                )
+                n, _, h, w = left.shape
+                disp_vals_topk_4x = disp_vals_topk_4x.view(
+                    [1, self.max_disp // 4, 1, 1]
+                ).repeat(n, 1, h // 4, w // 4)
 
-        # cost_volume: 1 x 12 x 24 x 60 x 80, 8x
-        cost_volume_8x = self.cost_builder(l_fmaps[1], r_fmaps[1])
+            concat_features_left = self.concat_feature(features_left[0])
+            concat_features_right = self.concat_feature(features_right[0])
+            # concat_volume: 1 x 32 x 24 x 120 x 160, concat volume
+            concat_volume = self.concat_volume_generator(
+                concat_features_left, concat_features_right, disp_vals_topk_4x
+            )
+            concat_volume = disp_probs_topk_4x * concat_volume
+            concat_volume = self.concat_stem(concat_volume)
+            concat_volume = self.concat_feature_att_4(concat_volume, features_left[0])
+            seman_weights_4x = self.hourglass(concat_volume, features_left).squeeze(1)
 
-        cost_weights_4x = self.cost_filter(cost_volume_8x, l_fmaps)
-        print()
+        if self.use_topk_sort:
+            cost_weights_4x = torch.gather(cost_weights_4x, 1, ind_k)
+            disp_probs_topk_4x = F.softmax(cost_weights_4x, dim=1)
+            l_disp_cost_4x = torch.sum(
+                disp_probs_topk_4x * disp_vals_topk_4x, dim=1, keepdim=True
+            )
+        else:
+            l_disp_cost_4x = disparity_regression(
+                disp_probs_4x, maxdisp=self.max_disp // 4
+            )
+        l_disp_cost_up = context_upsample(l_disp_cost_4x, spx_pred) * 4.0
 
+        if self.use_concat_volume:
+            if self.use_topk_sort:
+                l_disp_seman_4x = regression_topk(
+                    seman_weights_4x, disp_vals_topk_4x, 2
+                )
+            else:
+                l_disp_seman_4x = disparity_regression(
+                    torch.softmax(seman_weights_4x, dim=1), maxdisp=self.max_disp // 4
+                )
+            l_disp_seman_up = context_upsample(l_disp_seman_4x, spx_pred) * 4.0
 
-model = MobileStereoNetV6()
-x = torch.rand((1, 3, 480, 640))
-y = torch.rand((1, 3, 480, 640))
-_ = model(x, y)
+        if self.training:
+            if self.use_concat_volume:
+                return (
+                    [l_disp_cost_4x, l_disp_seman_4x, l_disp_cost_up, l_disp_seman_up],
+                    [None] * 4,
+                    [None] * 4,
+                )
+            else:
+                return (
+                    [l_disp_cost_4x, l_disp_cost_up],
+                    [None] * 4,
+                    [None] * 4,
+                )
+        else:
+            return [l_disp_seman_up] if self.use_concat_volume else [l_disp_cost_up]
