@@ -562,55 +562,53 @@ class FastACVNetSimple(nn.Module):
         features_left[1] = torch.cat((features_left[1], stem_8x), 1)
         features_right[1] = torch.cat((features_right[1], stem_8y), 1)
 
-        # corr_volume: 1 x 12 x 24 x 64 x 80, 8x
-        corr_volume = self.cost_builder(
+        # cost_volume_8x: 1 x 12 x 24 x 64 x 80, 8x
+        cost_volume_8x = self.cost_builder(
             features_left[1], features_right[1], use_naive=self.training
         )
-        corr_volume = self.patch(corr_volume)
+        cost_volume_8x = self.patch(cost_volume_8x)
 
-        # cost_att: 1 x 12 x 24 x 64 x 80, 8x, left image feature guided attention weights
-        cost_att = self.corr_feature_att_8(corr_volume, features_left[1])
-        # cost_att: 1 x 1 x 24 x 64 x 80, 8x, left image features guided hourglass filtering
-        cost_att = self.hourglass_att(cost_att, features_left)
+        # cost_volume_8x: 1 x 12 x 24 x 64 x 80, 8x, left image feature guided attention weights
+        cost_volume_8x = self.corr_feature_att_8(cost_volume_8x, features_left[1])
+        # cost_weights_8x: 1 x 1 x 24 x 64 x 80, 8x, left image features guided hourglass filtering
+        cost_weights_8x = self.hourglass_att(cost_volume_8x, features_left)
 
-        # att_weights: 1 x 1 x 48 x 120 x 240, 4x, cost volume, V_init
-        att_weights = F.interpolate(
-            cost_att,
-            [self.maxdisp // 4, left.size()[2] // 4, left.size()[3] // 4],
+        # cost_weights_4x: 1 x 1 x 48 x 120 x 240, 4x, cost volume, V_init
+        cost_weights_4x = F.interpolate(
+            cost_weights_8x,
+            [self.maxdisp // 4, left.shape[2] // 4, left.shape[3] // 4],
             mode="trilinear",
         )
 
-        pred_att = torch.squeeze(att_weights, 1)
-        # pred_att_prob: 1 x 48 x 120 x 160, P_init
-        pred_att_prob = F.softmax(pred_att, dim=1)
-        # pred_att: 1 x 1 x 120 x 160, D_init
-        pred_att = disparity_regression(pred_att_prob, self.maxdisp // 4)
-        # pred_variance: 1 x 1 x 120 x 160, U_i, confidence uncertainty,
-        pred_variance = disparity_variance(
-            pred_att_prob, self.maxdisp // 4, pred_att.unsqueeze(1)
-        )
-        pred_variance = self.beta + self.gamma * pred_variance
-        pred_variance = torch.sigmoid(pred_variance)
+        # disp_probs_4x: 1 x 48 x 120 x 160, D_init
+        disp_probs_4x = F.softmax(cost_weights_4x.squeeze(1), dim=1)
+        # disp_init_4x: 1 x 1 x 120 x 160, D_init
+        disp_init_4x = disparity_regression(disp_probs_4x, self.maxdisp // 4)
+        disp_init_4x = disp_init_4x.unsqueeze(1)
+        # disp_var_4x: 1 x 1 x 120 x 160, U_i, confidence uncertainty,
+        disp_var_4x = disparity_variance(disp_probs_4x, self.maxdisp // 4, disp_init_4x)
+        disp_var_4x = torch.sigmoid(self.beta + self.gamma * disp_var_4x)
+        # disp_var_4x_m: 1 x 5 x 120 x 160
+        disp_var_4x = self.propagation(disp_var_4x)
 
-        # pred_variance_samples: 1 x 5 x 120 x 160,  C_m_i
-        pred_variance_samples = self.propagation(pred_variance)
-
-        # disparity_samples: 1 x 5 x 120 x 160
-        disparity_samples = self.propagation(pred_att.unsqueeze(1))
+        # disp_init_4x_m: 1 x 5 x 120 x 160
+        disp_init_4x = self.propagation(disp_init_4x)
+        # left_feature_x4: 1 x 96 x 5 x 120 x 160
         right_feature_x4, left_feature_x4 = SpatialTransformer_grid(
-            stem_4x, stem_4y, disparity_samples
+            stem_4x, stem_4y, disp_init_4x
         )
-        disparity_sample_strength = (left_feature_x4 * right_feature_x4).mean(dim=1)
-        # disparity_sample_strength: 1 x 5 x 120 x 160, cross shape propagation weights, W_m_i
-        disparity_sample_strength = torch.softmax(
-            disparity_sample_strength * pred_variance_samples, dim=1
-        )
-        # att_weights: 1 x 1 x 48 x 120 x 160, cost volume after VAP, V_p_i_d
-        att_weights = self.propagation_prob(att_weights)
-        att_weights = att_weights * disparity_sample_strength.unsqueeze(2)
-        att_weights = torch.sum(att_weights, dim=1, keepdim=True)
+        # disp_match_4x_m: 1 x 5 x 120 x 160
+        disp_match_4x = (left_feature_x4 * right_feature_x4).mean(dim=1)
+        # disp_match_4x: 1 x 5 x 120 x 160, cross shape propagation weights, W_m_i
+        disp_match_4x = torch.softmax(disp_match_4x * disp_var_4x, dim=1)
+        
+        # cost_weights_4x: 1 x 5 x 48 x 120 x 160, cost volume after VAP, V_p_i_d
+        cost_weights_4x = self.propagation_prob(cost_weights_4x)
+        cost_weights_4x = cost_weights_4x * disp_match_4x.unsqueeze(2)
+        # cost_weights_4x: 1 x 1 x 48 x 120 x 160, cost volume after VAP, V_p_i_d
+        cost_weights_4x = torch.sum(cost_weights_4x, dim=1, keepdim=True)
 
-        att_weights_prob = F.softmax(att_weights, dim=2)
+        att_weights_prob = F.softmax(cost_weights_4x, dim=2)
 
         _, ind = att_weights_prob.sort(2, True)
         k = 24
@@ -638,7 +636,7 @@ class FastACVNetSimple(nn.Module):
         spx_pred = F.softmax(spx_pred, 1)
 
         if self.training:
-            att_prob = torch.gather(att_weights, 2, ind_k).squeeze(1)
+            att_prob = torch.gather(cost_weights_4x, 2, ind_k).squeeze(1)
             att_prob = F.softmax(att_prob, dim=1)
             pred_att = torch.sum(att_prob * disparity_sample_topk, dim=1)
             pred_att_up = context_upsample(pred_att.unsqueeze(1), spx_pred)
@@ -664,7 +662,7 @@ class FastACVNetSimple(nn.Module):
 
         else:
             if self.att_weights_only:
-                att_prob = torch.gather(att_weights, 2, ind_k).squeeze(1)
+                att_prob = torch.gather(cost_weights_4x, 2, ind_k).squeeze(1)
                 att_prob = F.softmax(att_prob, dim=1)
                 pred_att = torch.sum(att_prob * disparity_sample_topk, dim=1)
                 pred_att_up = context_upsample(pred_att.unsqueeze(1), spx_pred)
