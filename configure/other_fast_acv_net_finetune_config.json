@@ -32,9 +32,9 @@
         "type": "OtherFastACVNetSimple",
         "parameters": {
             "max_disp": 192,
-            "use_concat_volume": false,
-            "use_topk_sort": false,
-            "use_warp_score": false
+            "use_concat_volume": true,
+            "use_topk_sort": true,
+            "use_warp_score": true
         }
     },
     "data": {
