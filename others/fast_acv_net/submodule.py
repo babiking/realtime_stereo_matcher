@@ -144,7 +144,7 @@ def disparity_regression(x, maxdisp):
     assert len(x.shape) == 4
     disp_values = torch.arange(0, maxdisp, dtype=x.dtype, device=x.device)
     disp_values = disp_values.view(1, maxdisp, 1, 1)
-    return torch.sum(x * disp_values, 1)
+    return torch.sum(x * disp_values, 1, keepdim=True)
 
 
 def build_concat_volume(refimg_fea, targetimg_fea, maxdisp):
@@ -346,7 +346,7 @@ def context_upsample(depth_low, up_weights):
 
     depth = (depth_unfold * up_weights).sum(1)
 
-    return depth
+    return depth.unsqueeze(1)
 
 
 def regression_topk(cost, disparity_samples, k):

@@ -593,7 +593,6 @@ class FastACVNetSimple(nn.Module):
         disp_probs_4x = F.softmax(cost_weights_4x.squeeze(1), dim=1)
         # disp_init_4x: 1 x 1 x 120 x 160, D_init
         disp_init_4x = disparity_regression(disp_probs_4x, self.max_disp // 4)
-        disp_init_4x = disp_init_4x.unsqueeze(1)
         # disp_var_4x: 1 x 1 x 120 x 160, U_i, confidence uncertainty,
         disp_var_4x = disparity_variance(
             disp_probs_4x, self.max_disp // 4, disp_init_4x
@@ -620,19 +619,21 @@ class FastACVNetSimple(nn.Module):
         # cost_weights_4x: 1 x 5 x 48 x 120 x 160, cost volume after VAP, V_p_i_d
         cost_weights_4x = self.propagation_prob(cost_weights_4x)
         cost_weights_4x = cost_weights_4x * disp_match_4x.unsqueeze(2)
-        # cost_weights_4x: 1 x 1 x 48 x 120 x 160, cost volume after VAP, V_p_i_d
-        cost_weights_4x = torch.sum(cost_weights_4x, dim=1).unsqueeze(1)
+        # cost_weights_4x: 1 x 48 x 120 x 160, cost volume after VAP, V_p_i_d
+        cost_weights_4x = torch.sum(cost_weights_4x, dim=1)
 
-        # disp_probs_4x: 1 x 1 x 48 x 120 x 160, disparity probability
-        disp_probs_4x = F.softmax(cost_weights_4x, dim=2)
+        # disp_probs_4x: 1 x 48 x 120 x 160, disparity probability
+        disp_probs_4x = F.softmax(cost_weights_4x, dim=1)
 
         if self.use_topk_sort:
-            _, ind = disp_probs_4x.sort(2, True)
+            _, ind = disp_probs_4x.sort(1, True)
             k = self.max_disp // 4 // 2
-            ind_k = ind[:, :, :k]
-            ind_k = ind_k.sort(2, False)[0]
-            disp_probs_topk_4x = torch.gather(disp_probs_4x, 2, ind_k)
-            disp_vals_topk_4x = ind_k.squeeze(1).float()
+            ind_k = ind[:, :k]
+            ind_k = ind_k.sort(1, False)[0]
+            # disp_probs_topk_4x: 1 x 24 x 120 x 160, disparity top-k probability
+            disp_probs_topk_4x = torch.gather(disp_probs_4x, 1, ind_k)
+            # disp_vals_topk_4x: 1 x 24 x 120 x 160, disparity top-k value
+            disp_vals_topk_4x = ind_k.float()
 
         if self.use_concat_volume:
             if not self.use_topk_sort:
@@ -660,16 +661,16 @@ class FastACVNetSimple(nn.Module):
             seman_weights_4x = self.hourglass(concat_volume, features_left).squeeze(1)
 
         if self.use_topk_sort:
-            cost_weights_4x = torch.gather(cost_weights_4x, 2, ind_k).squeeze(1)
+            cost_weights_4x = torch.gather(cost_weights_4x, 1, ind_k)
             disp_probs_topk_4x = F.softmax(cost_weights_4x, dim=1)
             l_disp_cost_4x = torch.sum(
-                disp_probs_topk_4x * disp_vals_topk_4x, dim=1
-            ).unsqueeze(1)
+                disp_probs_topk_4x * disp_vals_topk_4x, dim=1, keepdim=True
+            )
         else:
             l_disp_cost_4x = disparity_regression(
-                disp_probs_4x.squeeze(1), maxdisp=self.max_disp // 4
-            ).unsqueeze(1)
-        l_disp_cost_up = context_upsample(l_disp_cost_4x, spx_pred).unsqueeze(1) * 4.0
+                disp_probs_4x, maxdisp=self.max_disp // 4
+            )
+        l_disp_cost_up = context_upsample(l_disp_cost_4x, spx_pred) * 4.0
 
         if self.use_concat_volume:
             if self.use_topk_sort:
@@ -679,10 +680,8 @@ class FastACVNetSimple(nn.Module):
             else:
                 l_disp_seman_4x = disparity_regression(
                     torch.softmax(seman_weights_4x, dim=1), maxdisp=self.max_disp // 4
-                ).unsqueeze(1)
-            l_disp_seman_up = (
-                context_upsample(l_disp_seman_4x, spx_pred).unsqueeze(1) * 4.0
-            )
+                )
+            l_disp_seman_up = context_upsample(l_disp_seman_4x, spx_pred) * 4.0
 
         if self.training:
             if self.use_concat_volume:
