@@ -368,6 +368,102 @@ class hourglass_att(nn.Module):
         return conv
 
 
+class GroupwiseCostVolume3D(nn.Module):
+    def __init__(self, hidden_dim, max_disp, num_cost_groups, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        self.hidden_dim = hidden_dim
+        self.max_disp = max_disp
+        self.num_cost_groups = num_cost_groups
+
+        self.l_kernels = self.get_conv2d_kernels(reverse=False)
+        self.r_kernels = self.get_conv2d_kernels(reverse=True)
+
+    def get_conv2d_kernels(self, reverse=True):
+        kernels = []
+        for i in range(1, self.max_disp):
+            kernel = np.zeros(shape=[self.hidden_dim, 1, 1, i + 1], dtype=np.float32)
+            kernel[:, 0, 0, (0 if reverse else -1)] = 1.0
+            kernel = torch.tensor(kernel, dtype=torch.float32)
+
+            kernels.append(kernel)
+        return kernels
+
+    def get_cost_item(self, l_fmap, r_fmap):
+        n, c, h, w = l_fmap.shape
+        assert c % self.num_cost_groups == 0
+        ch_per_group = c // self.num_cost_groups
+        l_fmap = l_fmap.view([n, self.num_cost_groups, ch_per_group, h, w])
+        r_fmap = r_fmap.view([n, self.num_cost_groups, ch_per_group, h, w])
+        cost_item = (
+            l_fmap
+            / (torch.norm(l_fmap, p=2, dim=2, keepdim=True) + 1e-05)
+            * r_fmap
+            / (torch.norm(r_fmap, p=2, dim=2, keepdim=True) + 1e-05)
+        ).mean(dim=2)
+        return cost_item
+
+    def make_cost_volume_naive(self, l_fmap, r_fmap):
+        # left: 1 x 32 x 60 x 80
+        # right: 1 x 32 x 60 x 80
+        # max_disp: 24
+        # cost_volume: 1 x 32 x 24 x 60 x 80
+        n, c, h, w = l_fmap.shape
+
+        cost_volume = torch.zeros(
+            size=[n, self.num_cost_groups, self.max_disp, h, w],
+            dtype=l_fmap.dtype,
+            device=l_fmap.device,
+        )
+
+        # for any disparity d:
+        #   cost_volume[:, :, d, :, :d] = 1.0
+        #   cost_volume[:, :, d, :, d:] = left[:, :, :, d:] - right[:, :, :, :-d]
+        cost_volume[:, :, 0, :, :] = self.get_cost_item(l_fmap, r_fmap)
+        for d in range(1, self.max_disp):
+            cost_volume[:, :, d, :, d:] = self.get_cost_item(
+                l_fmap[:, :, :, d:], r_fmap[:, :, :, :-d]
+            )
+
+        # cost_volume: 1 x 32 x 24 x 60 x 80
+        return cost_volume
+
+    def make_cost_volume_conv2d(self, l_fmap, r_fmap):
+        cost_volume = []
+        for d in range(self.max_disp):
+            if d == 0:
+                cost_volume.append(self.get_cost_item(l_fmap, r_fmap).unsqueeze(2))
+            else:
+                x = F.conv2d(
+                    l_fmap,
+                    self.l_kernels[d - 1].to(l_fmap.device),
+                    stride=1,
+                    padding=0,
+                    groups=self.hidden_dim,
+                )
+                y = F.conv2d(
+                    r_fmap,
+                    self.r_kernels[d - 1].to(r_fmap.device),
+                    stride=1,
+                    padding=0,
+                    groups=self.hidden_dim,
+                )
+                cost_item = self.get_cost_item(x, y)
+
+                cost_volume.append(
+                    F.pad(cost_item, [d, 0, 0, 0], value=0.0).unsqueeze(2)
+                )
+        cost_volume = torch.concat(cost_volume, dim=2)
+        return cost_volume
+
+    def forward(self, l_fmap, r_fmap, use_naive=True):
+        return (
+            self.make_cost_volume_naive(l_fmap, r_fmap)
+            if use_naive
+            else self.make_cost_volume_conv2d(l_fmap, r_fmap)
+        )
+
+
 class FastACVNetSimple(nn.Module):
     def __init__(self, maxdisp, att_weights_only):
         super(FastACVNetSimple, self).__init__()
@@ -436,6 +532,10 @@ class FastACVNetSimple(nn.Module):
         self.propagation = Propagation()
         self.propagation_prob = Propagation_prob()
 
+        self.cost_builder = GroupwiseCostVolume3D(
+            hidden_dim=96, max_disp=maxdisp // 8, num_cost_groups=12
+        )
+
     def concat_volume_generator(self, left_input, right_input, disparity_samples):
         right_feature_map, left_feature_map = SpatialTransformer_grid(
             left_input, right_input, disparity_samples
@@ -463,8 +563,8 @@ class FastACVNetSimple(nn.Module):
         features_right[1] = torch.cat((features_right[1], stem_8y), 1)
 
         # corr_volume: 1 x 12 x 24 x 64 x 80, 8x
-        corr_volume = build_gwc_volume_norm(
-            features_left[1], features_right[1], self.maxdisp // 8, 12
+        corr_volume = self.cost_builder(
+            features_left[1], features_right[1], use_naive=self.training
         )
         corr_volume = self.patch(corr_volume)
 
