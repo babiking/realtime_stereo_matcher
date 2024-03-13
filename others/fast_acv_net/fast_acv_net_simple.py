@@ -456,7 +456,7 @@ class GroupwiseCostVolume3D(nn.Module):
         cost_volume = torch.concat(cost_volume, dim=2)
         return cost_volume
 
-    def forward(self, l_fmap, r_fmap, use_naive=True):
+    def forward(self, l_fmap, r_fmap, use_naive):
         return (
             self.make_cost_volume_naive(l_fmap, r_fmap)
             if use_naive
@@ -465,12 +465,13 @@ class GroupwiseCostVolume3D(nn.Module):
 
 
 class FastACVNetSimple(nn.Module):
-    def __init__(self, max_disp, use_concat_volume, use_topk_sort, use_warp_score):
+    def __init__(self, max_disp, use_concat_volume, use_topk_sort, use_warp_score, use_naive_cost=False):
         super(FastACVNetSimple, self).__init__()
         self.max_disp = max_disp
         self.use_concat_volume = use_concat_volume
         self.use_topk_sort = use_topk_sort
         self.use_warp_score = use_warp_score
+        self.use_naive_cost = use_naive_cost
         self.feature = Feature()
         self.feature_up = FeatUp()
         self.gamma = nn.Parameter(torch.zeros(1))
@@ -574,7 +575,7 @@ class FastACVNetSimple(nn.Module):
 
         # cost_volume_8x: 1 x 12 x 24 x 64 x 80, 8x
         cost_volume_8x = self.cost_builder(
-            features_left[1], features_right[1], use_naive=self.training
+            features_left[1], features_right[1], use_naive=self.use_naive_cost
         )
         cost_volume_8x = self.patch(cost_volume_8x)
 

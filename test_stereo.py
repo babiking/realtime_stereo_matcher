@@ -18,17 +18,17 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/other_fast_acv_net_config.json",
+    "configure/other_fast_acv_net_finetune_config.json",
     "experiment configure json file",
 )
 gflags.DEFINE_string(
     "model_chkpt_file",
-    "others/fast_acv_net/checkpoint/Fast_ACVNet_generalization.ckpt",
+    "experiments/FAST_ACV_NET_FINETUNE_NO_WARP/checkpoints/FAST_ACV_NET_FINETUNE_NO_WARP-epoch-10000.pth.gz",
     "model checkpont file",
 )
 gflags.DEFINE_string(
     "left",
-    "/mnt/data/workspace/datasets/D435I/outdoor_blank_plane//image/*_left_Img.*",
+    "/mnt/data/workspace/datasets/D435I/outdoor_blank_plane/image/*_left_Img.*",
     "left images",
 )
 gflags.DEFINE_list(
@@ -38,7 +38,7 @@ gflags.DEFINE_list(
 )
 gflags.DEFINE_string(
     "output",
-    "/mnt/data/workspace/datasets/D435I/outdoor_blank_plane//predict",
+    "/mnt/data/workspace/datasets/D435I/outdoor_blank_plane/predict",
     "output path",
 )
 gflags.DEFINE_boolean(
@@ -107,9 +107,9 @@ def main():
         logging.info(f"Loading checkpoint: {FLAGS.model_chkpt_file}...")
         checkpoint = torch.load(FLAGS.model_chkpt_file)
         try:
-            model.load_state_dict(checkpoint, strict=True)
+            model.load_state_dict(checkpoint, strict=False)
         except:
-            model.load_state_dict(checkpoint["model"], strict=True)
+            model.load_state_dict(checkpoint["model"], strict=False)
         logging.info(f"Done loading checkpoint.")
 
         print(
