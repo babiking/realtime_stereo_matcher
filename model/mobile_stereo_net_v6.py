@@ -420,7 +420,7 @@ class MobileStereoNetV6(nn.Module):
         # features_left: [x4, x8, x16, x32]
         cost_weights_8x = self.cost_aggregate(cost_volume_8x, features_left[1])
 
-        # cost_weights_4x: 1 x 1 x 48 x 120 x 240, 4x, cost volume, V_init
+        # cost_weights_4x: 1 x 48 x 120 x 240, 4x, cost volume, V_init
         cost_weights_4x = F.interpolate(
             cost_weights_8x,
             [self.max_disp // 4, left.shape[2] // 4, left.shape[3] // 4],
@@ -493,7 +493,7 @@ class MobileStereoNetV6(nn.Module):
             concat_volume = self.concat_volume_generator(
                 concat_features_left, concat_features_right, disp_vals_topk_4x
             )
-            concat_volume = disp_probs_topk_4x * concat_volume
+            concat_volume = disp_probs_topk_4x.unsqueeze(1) * concat_volume
             concat_volume = self.concat_stem(concat_volume)
             concat_volume = self.concat_feature_att_4(concat_volume, features_left[0])
             seman_weights_4x = self.concat_aggregate(
