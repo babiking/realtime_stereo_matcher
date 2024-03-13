@@ -465,15 +465,15 @@ class GroupwiseCostVolume3D(nn.Module):
 
 
 class FastACVNetSimple(nn.Module):
-    def __init__(self, maxdisp, att_weights_only):
+    def __init__(self, max_disp, use_concat_volume, use_topk_sort):
         super(FastACVNetSimple, self).__init__()
-        self.att_weights_only = att_weights_only
-        self.maxdisp = maxdisp
+        self.max_disp = max_disp
+        self.use_concat_volume = use_concat_volume
+        self.use_topk_sort = use_topk_sort
         self.feature = Feature()
         self.feature_up = FeatUp()
         self.gamma = nn.Parameter(torch.zeros(1))
         self.beta = nn.Parameter(2 * torch.ones(1))
-        chans = [16, 24, 32, 96, 160]
 
         self.patch = nn.Conv3d(
             12,
@@ -533,7 +533,7 @@ class FastACVNetSimple(nn.Module):
         self.propagation_prob = Propagation_prob()
 
         self.cost_builder = GroupwiseCostVolume3D(
-            hidden_dim=96, max_disp=maxdisp // 8, num_cost_groups=12
+            hidden_dim=96, max_disp=max_disp // 8, num_cost_groups=12
         )
 
     def concat_volume_generator(self, left_input, right_input, disparity_samples):
@@ -582,17 +582,17 @@ class FastACVNetSimple(nn.Module):
         # cost_weights_4x: 1 x 1 x 48 x 120 x 240, 4x, cost volume, V_init
         cost_weights_4x = F.interpolate(
             cost_weights_8x,
-            [self.maxdisp // 4, left.shape[2] // 4, left.shape[3] // 4],
+            [self.max_disp // 4, left.shape[2] // 4, left.shape[3] // 4],
             mode="trilinear",
         )
 
         # disp_probs_4x: 1 x 48 x 120 x 160, D_init
         disp_probs_4x = F.softmax(cost_weights_4x.squeeze(1), dim=1)
         # disp_init_4x: 1 x 1 x 120 x 160, D_init
-        disp_init_4x = disparity_regression(disp_probs_4x, self.maxdisp // 4)
+        disp_init_4x = disparity_regression(disp_probs_4x, self.max_disp // 4)
         disp_init_4x = disp_init_4x.unsqueeze(1)
         # disp_var_4x: 1 x 1 x 120 x 160, U_i, confidence uncertainty,
-        disp_var_4x = disparity_variance(disp_probs_4x, self.maxdisp // 4, disp_init_4x)
+        disp_var_4x = disparity_variance(disp_probs_4x, self.max_disp // 4, disp_init_4x)
         disp_var_4x = torch.sigmoid(self.beta + self.gamma * disp_var_4x)
         # disp_var_4x_m: 1 x 5 x 120 x 160
         disp_var_4x = self.propagation(disp_var_4x)
@@ -625,7 +625,7 @@ class FastACVNetSimple(nn.Module):
             disp_probs_topk_4x = torch.gather(disp_probs_4x, 2, ind_k)
             disp_vals_topk_4x = ind_k.squeeze(1).float()
 
-            if not self.att_weights_only:
+            if self.use_concat_volume:
                 concat_features_left = self.concat_feature(features_left[0])
                 concat_features_right = self.concat_feature(features_right[0])
                 # concat_volume: 1 x 32 x 24 x 120 x 160, concat volume
@@ -641,7 +641,7 @@ class FastACVNetSimple(nn.Module):
             disp_probs_topk_4x = F.softmax(cost_weights_4x, dim=1)
             pred_att = torch.sum(disp_probs_topk_4x * disp_vals_topk_4x, dim=1)
             pred_att_up = context_upsample(pred_att.unsqueeze(1), spx_pred)
-            if self.att_weights_only:
+            if not self.use_concat_volume:
                 return (
                     [pred_att.unsqueeze(1), pred_att_up.unsqueeze(1) * 4.0],
                     [None] * 2,
@@ -663,15 +663,15 @@ class FastACVNetSimple(nn.Module):
 
         else:
             disp_vals_4x = disparity_regression(
-                disp_probs_4x.squeeze(1), maxdisp=self.maxdisp // 4
+                disp_probs_4x.squeeze(1), maxdisp=self.max_disp // 4
             ).unsqueeze(1)
 
-            if self.att_weights_only:
+            if not self.use_concat_volume:
                 disp_vals_up = context_upsample(disp_vals_4x, spx_pred)
                 return [disp_vals_up.unsqueeze(1) * 4.0]
             else:
                 _, ind = disp_probs_4x.sort(2, True)
-                k = self.maxdisp // 4 // 2
+                k = self.max_disp // 4 // 2
                 ind_k = ind[:, :, :k]
                 ind_k = ind_k.sort(2, False)[0]
                 disp_probs_topk_4x = torch.gather(disp_probs_4x, 2, ind_k)

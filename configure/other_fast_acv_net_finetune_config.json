@@ -31,8 +31,9 @@
     "model": {
         "type": "OtherFastACVNetSimple",
         "parameters": {
-            "maxdisp": 192,
-            "att_weights_only": true
+            "max_disp": 192,
+            "use_concat_volume": true,
+            "use_topk_sort": false
         }
     },
     "data": {
