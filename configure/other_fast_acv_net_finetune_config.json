@@ -33,7 +33,7 @@
         "parameters": {
             "max_disp": 192,
             "use_concat_volume": true,
-            "use_topk_sort": false
+            "use_topk_sort": true
         }
     },
     "data": {

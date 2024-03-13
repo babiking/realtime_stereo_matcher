@@ -592,7 +592,9 @@ class FastACVNetSimple(nn.Module):
         disp_init_4x = disparity_regression(disp_probs_4x, self.max_disp // 4)
         disp_init_4x = disp_init_4x.unsqueeze(1)
         # disp_var_4x: 1 x 1 x 120 x 160, U_i, confidence uncertainty,
-        disp_var_4x = disparity_variance(disp_probs_4x, self.max_disp // 4, disp_init_4x)
+        disp_var_4x = disparity_variance(
+            disp_probs_4x, self.max_disp // 4, disp_init_4x
+        )
         disp_var_4x = torch.sigmoid(self.beta + self.gamma * disp_var_4x)
         # disp_var_4x_m: 1 x 5 x 120 x 160
         disp_var_4x = self.propagation(disp_var_4x)
@@ -617,77 +619,76 @@ class FastACVNetSimple(nn.Module):
         # disp_probs_4x: 1 x 1 x 48 x 120 x 160, disparity probability
         disp_probs_4x = F.softmax(cost_weights_4x, dim=2)
 
-        if self.training:
+        if self.use_topk_sort:
             _, ind = disp_probs_4x.sort(2, True)
-            k = self.maxdisp // 4 // 2
+            k = self.max_disp // 4 // 2
             ind_k = ind[:, :, :k]
             ind_k = ind_k.sort(2, False)[0]
             disp_probs_topk_4x = torch.gather(disp_probs_4x, 2, ind_k)
             disp_vals_topk_4x = ind_k.squeeze(1).float()
 
-            if self.use_concat_volume:
-                concat_features_left = self.concat_feature(features_left[0])
-                concat_features_right = self.concat_feature(features_right[0])
-                # concat_volume: 1 x 32 x 24 x 120 x 160, concat volume
-                concat_volume = self.concat_volume_generator(
-                    concat_features_left, concat_features_right, disp_vals_topk_4x
+        if self.use_concat_volume:
+            if not self.use_topk_sort:
+                disp_probs_topk_4x = disp_probs_4x
+                disp_vals_topk_4x = torch.arange(
+                    0,
+                    self.max_disp // 4,
+                    dtype=disp_probs_4x.dtype,
+                    device=disp_probs_4x.device,
                 )
-                volume = disp_probs_topk_4x * concat_volume
-                volume = self.concat_stem(volume)
-                volume = self.concat_feature_att_4(volume, features_left[0])
-                cost = self.hourglass(volume, features_left)
+                n, _, h, w = left.shape
+                disp_vals_topk_4x = disp_vals_topk_4x.view(
+                    [1, self.max_disp // 4, 1, 1]
+                ).repeat(n, 1, h // 4, w // 4)
 
+            concat_features_left = self.concat_feature(features_left[0])
+            concat_features_right = self.concat_feature(features_right[0])
+            # concat_volume: 1 x 32 x 24 x 120 x 160, concat volume
+            concat_volume = self.concat_volume_generator(
+                concat_features_left, concat_features_right, disp_vals_topk_4x
+            )
+            concat_volume = disp_probs_topk_4x * concat_volume
+            concat_volume = self.concat_stem(concat_volume)
+            concat_volume = self.concat_feature_att_4(concat_volume, features_left[0])
+            seman_weights_4x = self.hourglass(concat_volume, features_left).squeeze(1)
+
+        if self.use_topk_sort:
             cost_weights_4x = torch.gather(cost_weights_4x, 2, ind_k).squeeze(1)
             disp_probs_topk_4x = F.softmax(cost_weights_4x, dim=1)
-            pred_att = torch.sum(disp_probs_topk_4x * disp_vals_topk_4x, dim=1)
-            pred_att_up = context_upsample(pred_att.unsqueeze(1), spx_pred)
-            if not self.use_concat_volume:
-                return (
-                    [pred_att.unsqueeze(1), pred_att_up.unsqueeze(1) * 4.0],
-                    [None] * 2,
-                    [None] * 2,
-                )
-            else:
-                pred = regression_topk(cost.squeeze(1), disp_vals_topk_4x, 2)
-                pred_up = context_upsample(pred, spx_pred)
-                return (
-                    [
-                        pred_att.unsqueeze(1),
-                        pred.squeeze(1).unsqueeze(1),
-                        pred_att_up.unsqueeze(1) * 4.0,
-                        pred_up.unsqueeze(1) * 4.0,
-                    ],
-                    [None] * 4,
-                    [None] * 4,
-                )
-
+            l_disp_cost_4x = torch.sum(
+                disp_probs_topk_4x * disp_vals_topk_4x, dim=1
+            ).unsqueeze(1)
         else:
-            disp_vals_4x = disparity_regression(
+            l_disp_cost_4x = disparity_regression(
                 disp_probs_4x.squeeze(1), maxdisp=self.max_disp // 4
             ).unsqueeze(1)
+        l_disp_cost_up = context_upsample(l_disp_cost_4x, spx_pred).unsqueeze(1) * 4.0
 
-            if not self.use_concat_volume:
-                disp_vals_up = context_upsample(disp_vals_4x, spx_pred)
-                return [disp_vals_up.unsqueeze(1) * 4.0]
-            else:
-                _, ind = disp_probs_4x.sort(2, True)
-                k = self.max_disp // 4 // 2
-                ind_k = ind[:, :, :k]
-                ind_k = ind_k.sort(2, False)[0]
-                disp_probs_topk_4x = torch.gather(disp_probs_4x, 2, ind_k)
-                disp_vals_topk_4x = ind_k.squeeze(1).float()
-
-                concat_features_left = self.concat_feature(features_left[0])
-                concat_features_right = self.concat_feature(features_right[0])
-                # concat_volume: 1 x 32 x 24 x 120 x 160, concat volume
-                concat_volume = self.concat_volume_generator(
-                    concat_features_left, concat_features_right, disp_vals_topk_4x
+        if self.use_concat_volume:
+            if self.use_topk_sort:
+                l_disp_seman_4x = regression_topk(
+                    seman_weights_4x, disp_vals_topk_4x, 2
                 )
-                volume = disp_probs_topk_4x * concat_volume
-                volume = self.concat_stem(volume)
-                volume = self.concat_feature_att_4(volume, features_left[0])
-                cost = self.hourglass(volume, features_left)
+            else:
+                l_disp_seman_4x = disparity_regression(
+                    torch.softmax(seman_weights_4x, dim=1), maxdisp=self.max_disp // 4
+                ).unsqueeze(1)
+            l_disp_seman_up = (
+                context_upsample(l_disp_seman_4x, spx_pred).unsqueeze(1) * 4.0
+            )
 
-                pred = regression_topk(cost.squeeze(1), disp_vals_topk_4x, 2)
-                pred_up = context_upsample(pred, spx_pred)
-                return [pred_up.unsqueeze(1) * 4.0]
+        if self.training:
+            if self.use_concat_volume:
+                return (
+                    [l_disp_cost_4x, l_disp_seman_4x, l_disp_cost_up, l_disp_seman_up],
+                    [None] * 4,
+                    [None] * 4,
+                )
+            else:
+                return (
+                    [l_disp_cost_4x, l_disp_cost_up],
+                    [None] * 4,
+                    [None] * 4,
+                )
+        else:
+            return [l_disp_seman_up] if self.use_concat_volume else [l_disp_cost_up]
