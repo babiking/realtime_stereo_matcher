@@ -465,11 +465,12 @@ class GroupwiseCostVolume3D(nn.Module):
 
 
 class FastACVNetSimple(nn.Module):
-    def __init__(self, max_disp, use_concat_volume, use_topk_sort):
+    def __init__(self, max_disp, use_concat_volume, use_topk_sort, use_warp_score):
         super(FastACVNetSimple, self).__init__()
         self.max_disp = max_disp
         self.use_concat_volume = use_concat_volume
         self.use_topk_sort = use_topk_sort
+        self.use_warp_score = use_warp_score
         self.feature = Feature()
         self.feature_up = FeatUp()
         self.gamma = nn.Parameter(torch.zeros(1))
@@ -523,12 +524,15 @@ class FastACVNetSimple(nn.Module):
         )
 
         self.corr_feature_att_8 = channelAtt(12, 96)
-        self.concat_feature_att_4 = channelAtt(16, 96)
+
+        if self.use_concat_volume:
+            self.concat_feature_att_4 = channelAtt(16, 96)
+            self.concat_hourglass = hourglass(16)
+            self.concat_stem = BasicConv(
+                32, 16, is_3d=True, kernel_size=3, stride=1, padding=1
+            )
+        
         self.hourglass_att = hourglass_att(12)
-        self.hourglass = hourglass(16)
-        self.concat_stem = BasicConv(
-            32, 16, is_3d=True, kernel_size=3, stride=1, padding=1
-        )
         self.propagation = Propagation()
         self.propagation_prob = Propagation_prob()
 
@@ -599,14 +603,18 @@ class FastACVNetSimple(nn.Module):
         # disp_var_4x_m: 1 x 5 x 120 x 160
         disp_var_4x = self.propagation(disp_var_4x)
 
-        # disp_init_4x_m: 1 x 5 x 120 x 160
-        disp_init_4x = self.propagation(disp_init_4x)
-        # left_feature_x4: 1 x 96 x 5 x 120 x 160
-        right_feature_x4, left_feature_x4 = SpatialTransformer_grid(
-            stem_4x, stem_4y, disp_init_4x
-        )
-        # disp_match_4x_m: 1 x 5 x 120 x 160
-        disp_match_4x = (left_feature_x4 * right_feature_x4).mean(dim=1)
+        if self.use_warp_score:
+            # disp_init_4x_m: 1 x 5 x 120 x 160
+            disp_init_4x = self.propagation(disp_init_4x)
+            # left_feature_x4: 1 x 96 x 5 x 120 x 160
+            right_feature_x4, left_feature_x4 = SpatialTransformer_grid(
+                stem_4x, stem_4y, disp_init_4x
+            )
+            # disp_match_4x_m: 1 x 5 x 120 x 160
+            disp_match_4x = (left_feature_x4 * right_feature_x4).mean(dim=1)
+        else:
+            disp_match_4x = 1.0
+        
         # disp_match_4x: 1 x 5 x 120 x 160, cross shape propagation weights, W_m_i
         disp_match_4x = torch.softmax(disp_match_4x * disp_var_4x, dim=1)
 
@@ -650,7 +658,7 @@ class FastACVNetSimple(nn.Module):
             concat_volume = disp_probs_topk_4x * concat_volume
             concat_volume = self.concat_stem(concat_volume)
             concat_volume = self.concat_feature_att_4(concat_volume, features_left[0])
-            seman_weights_4x = self.hourglass(concat_volume, features_left).squeeze(1)
+            seman_weights_4x = self.concat_hourglass(concat_volume, features_left).squeeze(1)
 
         if self.use_topk_sort:
             cost_weights_4x = torch.gather(cost_weights_4x, 2, ind_k).squeeze(1)
