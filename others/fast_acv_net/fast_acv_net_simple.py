@@ -397,9 +397,9 @@ class GroupwiseCostVolume3D(nn.Module):
         r_fmap = r_fmap.view([n, self.num_cost_groups, ch_per_group, h, w])
         cost_item = (
             l_fmap
-            / (torch.norm(l_fmap, p=2, dim=2, keepdim=True) + 1e-05)
+            / (torch.norm(l_fmap, p=2, dim=2).unsqueeze(2) + 1e-05)
             * r_fmap
-            / (torch.norm(r_fmap, p=2, dim=2, keepdim=True) + 1e-05)
+            / (torch.norm(r_fmap, p=2, dim=2).unsqueeze(2) + 1e-05)
         ).mean(dim=2)
         return cost_item
 
@@ -465,13 +465,12 @@ class GroupwiseCostVolume3D(nn.Module):
 
 
 class FastACVNetSimple(nn.Module):
-    def __init__(self, max_disp, use_concat_volume, use_topk_sort, use_warp_score, use_naive_cost=False):
+    def __init__(self, max_disp, use_concat_volume, use_topk_sort, use_warp_score):
         super(FastACVNetSimple, self).__init__()
         self.max_disp = max_disp
         self.use_concat_volume = use_concat_volume
         self.use_topk_sort = use_topk_sort
         self.use_warp_score = use_warp_score
-        self.use_naive_cost = use_naive_cost
         self.feature = Feature()
         self.feature_up = FeatUp()
         self.gamma = nn.Parameter(torch.zeros(1))
@@ -575,7 +574,7 @@ class FastACVNetSimple(nn.Module):
 
         # cost_volume_8x: 1 x 12 x 24 x 64 x 80, 8x
         cost_volume_8x = self.cost_builder(
-            features_left[1], features_right[1], use_naive=self.use_naive_cost
+            features_left[1], features_right[1], use_naive=is_train
         )
         cost_volume_8x = self.patch(cost_volume_8x)
 
@@ -623,7 +622,7 @@ class FastACVNetSimple(nn.Module):
         cost_weights_4x = self.propagation_prob(cost_weights_4x)
         cost_weights_4x = cost_weights_4x * disp_match_4x.unsqueeze(2)
         # cost_weights_4x: 1 x 1 x 48 x 120 x 160, cost volume after VAP, V_p_i_d
-        cost_weights_4x = torch.sum(cost_weights_4x, dim=1, keepdim=True)
+        cost_weights_4x = torch.sum(cost_weights_4x, dim=1).unsqueeze(1)
 
         # disp_probs_4x: 1 x 1 x 48 x 120 x 160, disparity probability
         disp_probs_4x = F.softmax(cost_weights_4x, dim=2)
