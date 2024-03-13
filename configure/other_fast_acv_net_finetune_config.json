@@ -1,0 +1,55 @@
+{
+    "name": "FAST_ACV_NET_FINETUNE_NO_WARP",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/FAST_ACV_NET_FINETUNE_NO_WARP",
+    "train": {
+        "batch_size": 4,
+        "restore_checkpoint": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/FAST_ACV_NET_REPRODUCE/checkpoints/FAST_ACV_NET_REPRODUCE-epoch-200000.pth.gz",
+        "save_checkpoint_frequency": 1000,
+        "datasets": [
+            "realsense_train"
+        ],
+        "learn_rate": 0.000004,
+        "num_of_steps": 10000,
+        "weight_decay": 0.00001,
+        "loss": [
+            {
+                "type": "SequenceLoss",
+                "parameters": {
+                    "loss_gamma": 0.9,
+                    "max_flow_magnitude": 700
+                }
+            }
+        ]
+    },
+    "test": {
+        "datasets": [
+            "realsense_test",
+            "middlebury_Q",
+            "kitti"
+        ]
+    },
+    "model": {
+        "type": "OtherFastACVNetSimple",
+        "parameters": {
+            "maxdisp": 192,
+            "att_weights_only": true
+        }
+    },
+    "data": {
+        "image_size": [
+            480,
+            640
+        ],
+        "image_gamma": [],
+        "spatial_scale": [
+            -0.2,
+            0.4
+        ],
+        "saturation_range": [
+            0,
+            1.4
+        ],
+        "do_flip": false,
+        "no_y_jitter": false
+    }
+}
