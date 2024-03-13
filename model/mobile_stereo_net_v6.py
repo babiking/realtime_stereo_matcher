@@ -121,17 +121,6 @@ class CostAggregate3D(nn.Module):
         self.conv1 = nn.Sequential(
             BasicConv(
                 in_dim,
-                in_dim * 2,
-                is_3d=True,
-                bn=True,
-                relu=True,
-                kernel_size=3,
-                padding=1,
-                stride=1,
-                dilation=1,
-            ),
-            BasicConv(
-                in_dim * 2,
                 in_dim,
                 is_3d=True,
                 bn=True,
@@ -140,23 +129,12 @@ class CostAggregate3D(nn.Module):
                 padding=1,
                 stride=1,
                 dilation=1,
-            ),
+            )
         )
 
         self.conv2 = nn.Sequential(
             BasicConv(
                 in_dim,
-                in_dim * 4,
-                is_3d=True,
-                bn=True,
-                relu=True,
-                kernel_size=3,
-                padding=1,
-                stride=1,
-                dilation=1,
-            ),
-            BasicConv(
-                in_dim * 4,
                 in_dim,
                 is_3d=True,
                 bn=True,
@@ -165,29 +143,21 @@ class CostAggregate3D(nn.Module):
                 padding=1,
                 stride=1,
                 dilation=1,
-            ),
+            )
         )
 
         self.conv3 = nn.Sequential(
             BasicConv(
                 in_dim,
-                in_dim * 2,
+                in_dim,
                 is_3d=True,
                 kernel_size=1,
                 padding=0,
                 stride=1,
             ),
             BasicConv(
-                in_dim * 2,
-                in_dim * 2,
-                is_3d=True,
-                kernel_size=3,
-                padding=1,
-                stride=1,
-            ),
-            BasicConv(
-                in_dim * 2,
-                in_dim * 2,
+                in_dim,
+                in_dim,
                 is_3d=True,
                 kernel_size=3,
                 padding=1,
@@ -195,8 +165,8 @@ class CostAggregate3D(nn.Module):
             ),
         )
 
-        self.feature_att = channelAtt(in_dim * 2, fmap_dim)
-        self.conv_final = nn.Conv3d(in_dim * 2, 1, 3, 1, 1, bias=False)
+        self.feature_att = channelAtt(in_dim, fmap_dim)
+        self.conv_final = nn.Conv3d(in_dim, 1, 3, 1, 1, bias=False)
 
     def forward(self, x, fmap):
         conv1 = self.conv1(x)
