@@ -662,20 +662,21 @@ class FastACVNetSimple(nn.Module):
                 )
 
         else:
-            _, ind = disp_probs_4x.sort(2, True)
-            k = self.maxdisp // 4 // 2
-            ind_k = ind[:, :, :k]
-            ind_k = ind_k.sort(2, False)[0]
-            disp_probs_topk_4x = torch.gather(disp_probs_4x, 2, ind_k)
-            disp_vals_topk_4x = ind_k.squeeze(1).float()
+            disp_vals_4x = disparity_regression(
+                disp_probs_4x.squeeze(1), maxdisp=self.maxdisp // 4
+            ).unsqueeze(1)
 
             if self.att_weights_only:
-                att_prob = torch.gather(cost_weights_4x, 2, ind_k).squeeze(1)
-                att_prob = F.softmax(att_prob, dim=1)
-                pred_att = torch.sum(att_prob * disp_vals_topk_4x, dim=1)
-                pred_att_up = context_upsample(pred_att.unsqueeze(1), spx_pred)
-                return [pred_att_up.unsqueeze(1) * 4.0]
+                disp_vals_up = context_upsample(disp_vals_4x, spx_pred)
+                return [disp_vals_up.unsqueeze(1) * 4.0]
             else:
+                _, ind = disp_probs_4x.sort(2, True)
+                k = self.maxdisp // 4 // 2
+                ind_k = ind[:, :, :k]
+                ind_k = ind_k.sort(2, False)[0]
+                disp_probs_topk_4x = torch.gather(disp_probs_4x, 2, ind_k)
+                disp_vals_topk_4x = ind_k.squeeze(1).float()
+
                 concat_features_left = self.concat_feature(features_left[0])
                 concat_features_right = self.concat_feature(features_right[0])
                 # concat_volume: 1 x 32 x 24 x 120 x 160, concat volume
