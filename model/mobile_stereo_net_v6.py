@@ -111,25 +111,28 @@ class channelAtt(SubModule):
         return cv
 
 
-class hourglass(nn.Module):
-    def __init__(self, in_channels):
-        super(hourglass, self).__init__()
+class CostAggregate3D(nn.Module):
+    def __init__(self, in_dim, fmap_dim):
+        super(CostAggregate3D, self).__init__()
+
+        self.in_dim = in_dim
+        self.fmap_dim = fmap_dim
 
         self.conv1 = nn.Sequential(
             BasicConv(
-                in_channels,
-                in_channels * 2,
+                in_dim,
+                in_dim * 2,
                 is_3d=True,
                 bn=True,
                 relu=True,
                 kernel_size=3,
                 padding=1,
-                stride=2,
+                stride=1,
                 dilation=1,
             ),
             BasicConv(
-                in_channels * 2,
-                in_channels * 2,
+                in_dim * 2,
+                in_dim,
                 is_3d=True,
                 bn=True,
                 relu=True,
@@ -142,19 +145,19 @@ class hourglass(nn.Module):
 
         self.conv2 = nn.Sequential(
             BasicConv(
-                in_channels * 2,
-                in_channels * 4,
+                in_dim,
+                in_dim * 4,
                 is_3d=True,
                 bn=True,
                 relu=True,
                 kernel_size=3,
                 padding=1,
-                stride=2,
+                stride=1,
                 dilation=1,
             ),
             BasicConv(
-                in_channels * 4,
-                in_channels * 4,
+                in_dim * 4,
+                in_dim,
                 is_3d=True,
                 bn=True,
                 relu=True,
@@ -165,50 +168,26 @@ class hourglass(nn.Module):
             ),
         )
 
-        self.conv2_up = BasicConv(
-            in_channels * 4,
-            in_channels * 2,
-            deconv=True,
-            is_3d=True,
-            bn=True,
-            relu=True,
-            kernel_size=(4, 4, 4),
-            padding=(1, 1, 1),
-            stride=(2, 2, 2),
-        )
-
-        self.conv1_up = BasicConv(
-            in_channels * 2,
-            1,
-            deconv=True,
-            is_3d=True,
-            bn=False,
-            relu=False,
-            kernel_size=(4, 4, 4),
-            padding=(1, 1, 1),
-            stride=(2, 2, 2),
-        )
-
-        self.agg = nn.Sequential(
+        self.conv3 = nn.Sequential(
             BasicConv(
-                in_channels * 4,
-                in_channels * 2,
+                in_dim,
+                in_dim * 2,
                 is_3d=True,
                 kernel_size=1,
                 padding=0,
                 stride=1,
             ),
             BasicConv(
-                in_channels * 2,
-                in_channels * 2,
+                in_dim * 2,
+                in_dim * 2,
                 is_3d=True,
                 kernel_size=3,
                 padding=1,
                 stride=1,
             ),
             BasicConv(
-                in_channels * 2,
-                in_channels * 2,
+                in_dim * 2,
+                in_dim * 2,
                 is_3d=True,
                 kernel_size=3,
                 padding=1,
@@ -216,153 +195,16 @@ class hourglass(nn.Module):
             ),
         )
 
-        self.feature_att_8 = channelAtt(in_channels * 2, 96)
-        self.feature_att_16 = channelAtt(in_channels * 4, 192)
-        self.feature_att_up_8 = channelAtt(in_channels * 2, 96)
+        self.feature_att = channelAtt(in_dim * 2, fmap_dim)
+        self.conv_final = nn.Conv3d(in_dim * 2, 1, 3, 1, 1, bias=False)
 
-    def forward(self, x, imgs):
+    def forward(self, x, fmap):
         conv1 = self.conv1(x)
-        conv1 = self.feature_att_8(conv1, imgs[1])
-
         conv2 = self.conv2(conv1)
-        conv2 = self.feature_att_16(conv2, imgs[2])
-
-        conv2_up = self.conv2_up(conv2)
-        conv1 = torch.cat((conv2_up, conv1), dim=1)
-        conv1 = self.agg(conv1)
-        conv1 = self.feature_att_up_8(conv1, imgs[1])
-
-        conv = self.conv1_up(conv1)
-
-        return conv
-
-
-class hourglass_att(nn.Module):
-    def __init__(self, in_channels):
-        super(hourglass_att, self).__init__()
-
-        self.conv1 = nn.Sequential(
-            BasicConv(
-                in_channels,
-                in_channels * 2,
-                is_3d=True,
-                bn=True,
-                relu=True,
-                kernel_size=3,
-                padding=1,
-                stride=2,
-                dilation=1,
-            ),
-            BasicConv(
-                in_channels * 2,
-                in_channels * 2,
-                is_3d=True,
-                bn=True,
-                relu=True,
-                kernel_size=3,
-                padding=1,
-                stride=1,
-                dilation=1,
-            ),
-        )
-
-        self.conv2 = nn.Sequential(
-            BasicConv(
-                in_channels * 2,
-                in_channels * 4,
-                is_3d=True,
-                bn=True,
-                relu=True,
-                kernel_size=3,
-                padding=1,
-                stride=2,
-                dilation=1,
-            ),
-            BasicConv(
-                in_channels * 4,
-                in_channels * 4,
-                is_3d=True,
-                bn=True,
-                relu=True,
-                kernel_size=3,
-                padding=1,
-                stride=1,
-                dilation=1,
-            ),
-        )
-
-        self.conv2_up = BasicConv(
-            in_channels * 4,
-            in_channels * 2,
-            deconv=True,
-            is_3d=True,
-            bn=True,
-            relu=True,
-            kernel_size=(4, 4, 4),
-            padding=(1, 1, 1),
-            stride=(2, 2, 2),
-        )
-
-        self.conv1_up_ = BasicConv(
-            in_channels * 2,
-            in_channels,
-            deconv=True,
-            is_3d=True,
-            bn=True,
-            relu=True,
-            kernel_size=(4, 4, 4),
-            padding=(1, 1, 1),
-            stride=(2, 2, 2),
-        )
-        self.conv_final = nn.Conv3d(in_channels, 1, 3, 1, 1, bias=False)
-
-        self.agg = nn.Sequential(
-            BasicConv(
-                in_channels * 4,
-                in_channels * 2,
-                is_3d=True,
-                kernel_size=1,
-                padding=0,
-                stride=1,
-            ),
-            BasicConv(
-                in_channels * 2,
-                in_channels * 2,
-                is_3d=True,
-                kernel_size=3,
-                padding=1,
-                stride=1,
-            ),
-            BasicConv(
-                in_channels * 2,
-                in_channels * 2,
-                is_3d=True,
-                kernel_size=3,
-                padding=1,
-                stride=1,
-            ),
-        )
-
-        self.feature_att_16 = channelAtt(in_channels * 2, 192)
-        self.feature_att_32 = channelAtt(in_channels * 4, 160)
-        self.feature_att_up_16 = channelAtt(in_channels * 2, 192)
-
-    def forward(self, x, imgs):
-        conv1 = self.conv1(x)
-        conv1 = self.feature_att_16(conv1, imgs[2])
-
-        conv2 = self.conv2(conv1)
-        conv2 = self.feature_att_32(conv2, imgs[3])
-
-        conv2_up = self.conv2_up(conv2)
-        conv1 = torch.cat((conv2_up, conv1), dim=1)
-        conv1 = self.agg(conv1)
-        conv1 = self.feature_att_up_16(conv1, imgs[2])
-
-        conv = self.conv1_up_(conv1)
-        conv = self.conv_final(conv)
-
-        return conv
+        conv3 = self.conv3(conv2)
+        conv3 = self.feature_att(conv3, fmap)
+        conv3 = self.conv_final(conv3)
+        return conv3
 
 
 class GroupwiseCostVolume3D(nn.Module):
@@ -473,17 +315,6 @@ class MobileStereoNetV6(nn.Module):
         self.gamma = nn.Parameter(torch.zeros(1))
         self.beta = nn.Parameter(2 * torch.ones(1))
 
-        self.patch = nn.Conv3d(
-            12,
-            12,
-            kernel_size=(1, 3, 3),
-            stride=1,
-            dilation=1,
-            groups=12,
-            padding=(0, 1, 1),
-            bias=False,
-        )
-
         self.stem_2 = nn.Sequential(
             BasicConv(3, 32, kernel_size=3, stride=2, padding=1),
             nn.Conv2d(32, 32, 3, 1, 1, bias=False),
@@ -515,7 +346,21 @@ class MobileStereoNetV6(nn.Module):
             nn.ReLU(),
         )
 
+        self.cost_builder = GroupwiseCostVolume3D(
+            hidden_dim=96, max_disp=max_disp // 8, num_cost_groups=12
+        )
+        self.patch = nn.Conv3d(
+            12,
+            12,
+            kernel_size=(1, 3, 3),
+            stride=1,
+            dilation=1,
+            groups=12,
+            padding=(0, 1, 1),
+            bias=False,
+        )
         self.corr_feature_att_8 = channelAtt(12, 96)
+        self.cost_aggregate = CostAggregate3D(in_dim=12, fmap_dim=96)
 
         if self.use_concat_volume:
             self.concat_feature = nn.Sequential(
@@ -523,18 +368,13 @@ class MobileStereoNetV6(nn.Module):
                 nn.Conv2d(32, 16, 3, 1, 1, bias=False),
             )
             self.concat_feature_att_4 = channelAtt(16, 96)
-            self.hourglass = hourglass(16)
+            self.concat_aggregate = CostAggregate3D(in_dim=16, fmap_dim=96)
             self.concat_stem = BasicConv(
                 32, 16, is_3d=True, kernel_size=3, stride=1, padding=1
             )
 
-        self.hourglass_att = hourglass_att(12)
         self.propagation = Propagation()
         self.propagation_prob = Propagation_prob()
-
-        self.cost_builder = GroupwiseCostVolume3D(
-            hidden_dim=96, max_disp=max_disp // 8, num_cost_groups=12
-        )
 
     def concat_volume_generator(self, left_input, right_input, disparity_samples):
         right_feature_map, left_feature_map = SpatialTransformer_grid(
@@ -577,17 +417,18 @@ class MobileStereoNetV6(nn.Module):
         # cost_volume_8x: 1 x 12 x 24 x 64 x 80, 8x, left image feature guided attention weights
         cost_volume_8x = self.corr_feature_att_8(cost_volume_8x, features_left[1])
         # cost_weights_8x: 1 x 1 x 24 x 64 x 80, 8x, left image features guided hourglass filtering
-        cost_weights_8x = self.hourglass_att(cost_volume_8x, features_left)
+        # features_left: [x4, x8, x16, x32]
+        cost_weights_8x = self.cost_aggregate(cost_volume_8x, features_left[1])
 
         # cost_weights_4x: 1 x 1 x 48 x 120 x 240, 4x, cost volume, V_init
         cost_weights_4x = F.interpolate(
             cost_weights_8x,
             [self.max_disp // 4, left.shape[2] // 4, left.shape[3] // 4],
             mode="trilinear",
-        )
+        ).squeeze(1)
 
         # disp_probs_4x: 1 x 48 x 120 x 160, D_init
-        disp_probs_4x = F.softmax(cost_weights_4x.squeeze(1), dim=1)
+        disp_probs_4x = F.softmax(cost_weights_4x, dim=1)
         # disp_init_4x: 1 x 1 x 120 x 160, D_init
         disp_init_4x = disparity_regression(disp_probs_4x, self.max_disp // 4)
         # disp_var_4x: 1 x 1 x 120 x 160, U_i, confidence uncertainty,
@@ -614,7 +455,7 @@ class MobileStereoNetV6(nn.Module):
         disp_match_4x = torch.softmax(disp_match_4x * disp_var_4x, dim=1)
 
         # cost_weights_4x: 1 x 5 x 48 x 120 x 160, cost volume after VAP, V_p_i_d
-        cost_weights_4x = self.propagation_prob(cost_weights_4x)
+        cost_weights_4x = self.propagation_prob(cost_weights_4x.unsqueeze(1))
         cost_weights_4x = cost_weights_4x * disp_match_4x.unsqueeze(2)
         # cost_weights_4x: 1 x 48 x 120 x 160, cost volume after VAP, V_p_i_d
         cost_weights_4x = torch.sum(cost_weights_4x, dim=1)
@@ -655,7 +496,9 @@ class MobileStereoNetV6(nn.Module):
             concat_volume = disp_probs_topk_4x * concat_volume
             concat_volume = self.concat_stem(concat_volume)
             concat_volume = self.concat_feature_att_4(concat_volume, features_left[0])
-            seman_weights_4x = self.hourglass(concat_volume, features_left).squeeze(1)
+            seman_weights_4x = self.concat_aggregate(
+                concat_volume, features_left[0]
+            ).squeeze(1)
 
         if self.use_topk_sort:
             cost_weights_4x = torch.gather(cost_weights_4x, 1, ind_k)
