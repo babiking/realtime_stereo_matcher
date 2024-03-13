@@ -223,7 +223,8 @@ def norm_correlation(fea1, fea2):
             * (fea2 / (torch.norm(fea2, 2, 1, True) + 1e-05))
         ),
         dim=1,
-    ).unsqueeze(1)
+        keepdim=True,
+    )
     return cost
 
 
@@ -247,7 +248,7 @@ def disparity_variance(x, maxdisp, disparity):
     disp_values = torch.arange(0, maxdisp, dtype=x.dtype, device=x.device)
     disp_values = disp_values.view(1, maxdisp, 1, 1)
     disp_values = (disp_values - disparity) ** 2
-    return torch.sum(x * disp_values, 1).unsqueeze(1)
+    return torch.sum(x * disp_values, 1, keepdim=True)
 
 
 def SpatialTransformer_grid(x, y, disp_range_samples):
@@ -355,5 +356,5 @@ def regression_topk(cost, disparity_samples, k):
     cost = torch.gather(cost, 1, pool_ind)
     prob = F.softmax(cost, 1)
     disparity_samples = torch.gather(disparity_samples, 1, pool_ind)
-    pred = torch.sum(disparity_samples * prob, dim=1).unsqueeze(1)
+    pred = torch.sum(disparity_samples * prob, dim=1, keepdim=True)
     return pred
