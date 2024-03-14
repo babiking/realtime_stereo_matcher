@@ -42,8 +42,14 @@ gflags.DEFINE_string(
     "output path",
 )
 gflags.DEFINE_boolean(
-    "use_onnx_inference", True, "if set, use onnx inference instead of pytorch"
+    "use_onnx_inference", False, "if set, use onnx inference instead of pytorch"
 )
+gflags.DEFINE_string(
+    "camera",
+    "/mnt/data/workspace/datasets/MyRealsense/train/20240307_desktop_0000/camera.json",
+    "camera intrinsic parameters",
+)
+gflags.DEFINE_boolean("use_depth_map", True, "if set, output depth map")
 
 autocast = torch.cuda.amp.autocast
 
@@ -83,6 +89,15 @@ def run_onnx_inference(l_img, r_img, onnx_file):
         },
     )
     return outputs
+
+
+def load_camera_json(json_file):
+    info = json.load(open(json_file, "r"))
+
+    fx = info["fx"]
+    baseline = info["baseline"]
+    unit = info["unit"]
+    return fx, baseline, unit
 
 
 def main():
@@ -187,10 +202,19 @@ def main():
         flow_pr = np.squeeze(flow_pr.cpu().detach().numpy(), axis=0).astype(np.float32)
         flow_color = colorize_2d_matrix(flow_pr, min_val=1.0, max_val=64.0)
 
-        flow_pfm_file = os.path.join(save_path, f"{l_img_name}_{w}x{h}_disparity.pfm")
+        if FLAGS.use_depth_map and os.path.exists(FLAGS.camera):
+            fx, baseline, _ = load_camera_json(FLAGS.camera)
+            invalid = np.where(flow_pr < 1e-9)
+            flow_pr = (fx * baseline) / (flow_pr + 1e-15)
+            flow_pr[invalid] = 0.0
+
+            pfm_tag = "depth"
+        else:
+            pfm_tag = "disparity"
+        flow_pfm_file = os.path.join(save_path, f"{l_img_name}_{w}x{h}_{pfm_tag}_Img.pfm")
         write_pfm_file(flow_pfm_file, np.flipud(flow_pr), 1.0)
 
-        flow_color_file = os.path.join(save_path, f"{l_img_name}_{w}x{h}_disparity.png")
+        flow_color_file = os.path.join(save_path, f"{l_img_name}_{w}x{h}_disparity_Img.png")
         cv.imwrite(flow_color_file, flow_color)
 
 
