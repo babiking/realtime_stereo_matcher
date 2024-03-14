@@ -457,9 +457,7 @@ class MobileStereoNetV7(nn.Module):
             hidden_dim=96, max_disp=max_disp // 8, num_cost_groups=12
         )
         self.corr_feature_att_8 = channelAtt(12, 96)
-        self.cost_aggregate = CostAggregateHourglass3D(
-            in_dim=12, fmap_dim=[192, 160], use_conv_final=False
-        )
+        self.cost_aggregate = CostAggregate3D(in_dim=12, fmap_dim=96)
 
         if self.use_concat_volume:
             self.concat_feature = nn.Sequential(
@@ -468,7 +466,7 @@ class MobileStereoNetV7(nn.Module):
             )
             self.concat_feature_att_4 = channelAtt(16, 96)
             self.concat_aggregate = CostAggregateHourglass3D(
-                in_dim=16, fmap_dim=[96, 192], use_conv_final=True
+                in_dim=16, fmap_dims=[96, 192], use_conv_final=True
             )
             self.concat_stem = BasicConv(
                 32, 16, is_3d=True, kernel_size=3, stride=1, padding=1
@@ -518,7 +516,7 @@ class MobileStereoNetV7(nn.Module):
         cost_volume_8x = self.corr_feature_att_8(cost_volume_8x, features_left[1])
         # cost_weights_8x: 1 x 1 x 24 x 64 x 80, 8x, left image features guided hourglass filtering
         # features_left: [x4, x8, x16, x32]
-        cost_weights_8x = self.cost_aggregate(cost_volume_8x, features_left[2:4])
+        cost_weights_8x = self.cost_aggregate(cost_volume_8x, features_left[1])
 
         # cost_weights_4x: 1 x 48 x 120 x 240, 4x, cost volume, V_init
         cost_weights_4x = F.interpolate(
