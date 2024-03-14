@@ -12,7 +12,7 @@ import gflags
 
 gflags.DEFINE_string(
     "data_path",
-    "/mnt/data/workspace/datasets/MyRealsense/20240226_fabric_0000",
+    "/mnt/data/workspace/datasets/MyRealsense/train/20240314_desktop_0000",
     "dataset path",
 )
 
@@ -127,6 +127,10 @@ def main():
 
         l_img = cv.imread(l_img_file, cv.IMREAD_UNCHANGED)
         r_img = cv.imread(r_img_file, cv.IMREAD_UNCHANGED)
+
+        if l_img is None or r_img is None:
+            print(f"invalid stereo image: {l_img_file}!")
+            continue
 
         h, w = l_img.shape[:2]
 
