@@ -4,6 +4,7 @@ from model.mobile_stereo_net_v3 import MobileStereoNetV3
 from model.mobile_stereo_net_v4 import MobileStereoNetV4
 from model.mobile_stereo_net_v5 import MobileStereoNetV5
 from model.mobile_stereo_net_v6 import MobileStereoNetV6
+from model.mobile_stereo_net_v7 import MobileStereoNetV7
 from model.opencv_sgbm_module import OpenCVSGBMModule
 from others.fast_acv_net.fast_acv_net import Fast_ACVNet
 from others.fast_acv_net.fast_acv_net_simple import FastACVNetSimple
@@ -22,6 +23,8 @@ def build_model(model_config):
         return MobileStereoNetV5(**model_config["parameters"])
     elif model_config["type"] == "MobileStereoNetV6":
         return MobileStereoNetV6(**model_config["parameters"])
+    elif model_config["type"] == "MobileStereoNetV7":
+        return MobileStereoNetV7(**model_config["parameters"])
     elif model_config["type"] == "OpenCVSGBMModule":
         return OpenCVSGBMModule(**model_config["parameters"])
     elif model_config["type"] == "OtherFastACVNet":
