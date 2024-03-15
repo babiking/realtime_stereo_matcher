@@ -1,16 +1,12 @@
 from __future__ import print_function, division
-import os
 import sys
 import time
-import json
 import logging
 import numpy as np
-import copy
+import cv2 as cv
 import torch
 import onnxruntime
-from tqdm import tqdm
 import dataset.stereo_datasets as datasets
-from dataset.input_padder import InputPadder
 import gflags
 
 gflags.DEFINE_string(
@@ -44,22 +40,33 @@ def validate_realsense(onnx_file):
 
     out_list, epe_list, fps_list = [], [], []
     for val_id in range(len(val_dataset)):
-        _, image1, image2, flow_gt, valid_gt = val_dataset[val_id]
-        image1 = image1[None]
-        image2 = image2[None]
+        (l_img_file, r_img_file, _), _, _, flow_gt, valid_gt = val_dataset[val_id]
+        l_img = cv.imread(l_img_file, cv.IMREAD_COLOR)
+        r_img = cv.imread(r_img_file, cv.IMREAD_COLOR)
 
-        image1 = 2.0 * (image1 / 255.0) - 1.0
-        image2 = 2.0 * (image2 / 255.0) - 1.0
+        h, w = l_img.shape[:2]
 
-        padder = InputPadder(image1.shape, divis_by=1)
-        image1, image2 = padder.pad(image1, image2)
+        # l_img = l_img[:, :, ::-1]
+        # r_img = r_img[:, :, ::-1]
+
+        l_img = torch.from_numpy(l_img.copy()).permute(2, 0, 1).float()
+        r_img = torch.from_numpy(r_img.copy()).permute(2, 0, 1).float()
+
+        l_img = l_img[None].cuda()
+        r_img = r_img[None].cuda()
+
+        # l_img = 2.0 * (l_img / 255.0) - 1.0
+        # r_img = 2.0 * (r_img / 255.0) - 1.0
+
+        l_img /= 255.0
+        r_img /= 255.0
 
         start = time.time()
-        flow_pr = run_onnx_inference(image1, image2, onnx_file)[-1]
+        flow_pr = run_onnx_inference(l_img, r_img, onnx_file)[-1]
         end = time.time()
 
-        flow_pr = torch.tensor(flow_pr, dtype=torch.float32).permute([0, 3, 1, 2])
-        flow_pr = padder.unpad(flow_pr.float()).cpu().squeeze(0)
+        flow_pr = flow_pr.transpose([0, 3, 1, 2])
+        flow_pr = torch.tensor(flow_pr, dtype=torch.float32).squeeze(0)
         assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
         epe = torch.sum((flow_pr - flow_gt) ** 2, dim=0).sqrt()
 
@@ -68,7 +75,10 @@ def validate_realsense(onnx_file):
             (valid_gt.flatten() >= 0.5)
             & (torch.isnan(flow_pr.flatten()) == 0)
             & (flow_pr.flatten() > 0.0)
+            & (flow_gt.flatten() > 0.0)
         )
+        ratio = val.float().sum().item() / h / w
+
         out_0_5 = epe_flattened > 0.5
         out_1_0 = epe_flattened > 1.0
         out_3_0 = epe_flattened > 3.0
@@ -82,7 +92,7 @@ def validate_realsense(onnx_file):
         image_epe = epe_flattened[val].mean().item()
         image_fps = 1.0 / (end - start)
         logging.info(
-            f"Realsense {val_id+1} out of {len(val_dataset)}. EPE: {image_epe:.4f}, D1: {image_out[1]:.4f}, FPS: {image_fps:.4f}."
+            f"Realsense {val_id+1} out of {len(val_dataset)}. Ratio: {ratio:.4f}, EPE: {image_epe:.4f}, D1: {image_out[1]:.4f}, FPS: {image_fps:.4f}."
         )
 
         epe_list.append(image_epe)
