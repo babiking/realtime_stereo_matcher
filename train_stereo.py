@@ -24,8 +24,11 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/stereo_net_config_v7.json",
+    "configure/stereo_net_config_v8.json",
     "experiment configure json file",
+)
+gflags.DEFINE_boolean(
+    "use_init_weights", False, "if set, initialize weights with normal distribution"
 )
 
 
@@ -137,7 +140,7 @@ def initialize(model):
                 nn.init.constant_(m.bias, 0)
 
 
-def train(exp_config):
+def train(exp_config, use_init_weights):
     model = nn.DataParallel(build_model(exp_config["model"]))
     logging.info(f"Model parameter count (pytorch): {count_parameters(model)}.")
 
@@ -150,7 +153,10 @@ def train(exp_config):
 
     model.cuda()
     model.train()
-    initialize(model.module)
+    if use_init_weights:
+        initialize(model.module)
+    else:
+        logging.warning("skip model weights initialization!")
 
     restore_ckpt = exp_config["train"]["restore_checkpoint"]
     if restore_ckpt is not None and len(restore_ckpt) > 0:
@@ -182,16 +188,17 @@ def train(exp_config):
 
             n, c, src_h, src_w = image1.shape
 
-            align = 2**4
+            align = 2**5
             w_pad = (align - (src_w % align)) % align
             h_pad = (align - (src_h % align)) % align
 
             # l_img: 1 x 3 x 480 x 640
-            image1 = F.pad(image1, (0, w_pad, 0, h_pad))
-            image2 = F.pad(image2, (0, w_pad, 0, h_pad))
+            if w_pad != 0 or h_pad != 0:
+                image1 = F.pad(image1, (0, w_pad, 0, h_pad))
+                image2 = F.pad(image2, (0, w_pad, 0, h_pad))
 
-            flow = F.pad(flow, (0, w_pad, 0, h_pad))
-            valid = F.pad(valid, (0, w_pad, 0, h_pad))
+                flow = F.pad(flow, (0, w_pad, 0, h_pad))
+                valid = F.pad(valid, (0, w_pad, 0, h_pad))
 
             assert model.training
             flow_predictions, l_fmaps, r_fmaps = model(image1, image2, is_train=True)
@@ -252,7 +259,7 @@ def main():
     )
 
     exp_config = json.load(open(FLAGS.exp_config_json, "r"))
-    train(exp_config)
+    train(exp_config, FLAGS.use_init_weights)
 
 
 if __name__ == "__main__":
