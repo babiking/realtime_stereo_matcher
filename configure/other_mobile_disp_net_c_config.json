@@ -1,0 +1,56 @@
+{
+    "name": "MOBILE_DISP_NET_C_REPRODUCE",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/MOBILE_DISP_NET_C_REPRODUCE",
+    "train": {
+        "batch_size": 8,
+        "restore_checkpoint": "",
+        "save_checkpoint_frequency": 10000,
+        "datasets": [
+            "middlebury_Q",
+            "eth3d",
+            "sceneflow/things",
+            "sceneflow/driving",
+            "kitti"
+        ],
+        "learn_rate": 0.0002,
+        "num_of_steps": 200000,
+        "weight_decay": 0.00001,
+        "loss": [
+            {
+                "type": "SequenceLoss",
+                "parameters": {
+                    "loss_gamma": 0.7,
+                    "max_flow_magnitude": 700
+                }
+            }
+        ]
+    },
+    "test": {
+        "datasets": [
+            "realsense_test",
+            "middlebury_Q",
+            "kitti"
+        ]
+    },
+    "model": {
+        "type": "MobileDispNetC",
+        "parameters": {}
+    },
+    "data": {
+        "image_size": [
+            240,
+            320
+        ],
+        "image_gamma": [],
+        "spatial_scale": [
+            -0.2,
+            0.4
+        ],
+        "saturation_range": [
+            0,
+            1.4
+        ],
+        "do_flip": false,
+        "no_y_jitter": false
+    }
+}

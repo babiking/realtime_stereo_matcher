@@ -24,11 +24,11 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/stereo_net_config_v8.json",
+    "configure/other_mobile_disp_net_c_config.json",
     "experiment configure json file",
 )
 gflags.DEFINE_boolean(
-    "use_init_weights", False, "if set, initialize weights with normal distribution"
+    "use_init_weights", True, "if set, initialize weights with normal distribution"
 )
 
 
