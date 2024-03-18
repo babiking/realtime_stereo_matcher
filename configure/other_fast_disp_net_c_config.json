@@ -35,10 +35,10 @@
     "model": {
         "type": "FastDispNetC",
         "parameters": {
-            "batchNorm": true,
+            "batchNorm": false,
             "lastRelu": true,
             "resBlock": true,
-            "maxdisp": 192,
+            "maxdisp": -1,
             "input_channel": 3,
             "get_features": false,
             "use_final_only": false
@@ -46,7 +46,7 @@
     },
     "data": {
         "image_size": [
-            240,
+            256,
             320
         ],
         "image_gamma": [],
