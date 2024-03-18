@@ -10,7 +10,6 @@ class FeatureExtract(nn.Module):
         self,
         in_dim=3,
         hidden_dims=[16, 32, 64, 96, 128, 192],
-        unify_dim=64,
         *args,
         **kwargs,
     ) -> None:
@@ -18,7 +17,6 @@ class FeatureExtract(nn.Module):
 
         self.in_dim = in_dim
         self.hidden_dims = hidden_dims
-        self.unify_dim = unify_dim
 
         self.down_layers = nn.ModuleList([])
         for i in range(len(hidden_dims)):
@@ -49,42 +47,13 @@ class FeatureExtract(nn.Module):
                 )
             )
 
-        self.unify_layers = nn.ModuleList([])
-        for layer_dim in [in_dim] + hidden_dims:
-            self.unify_layers.append(
-                nn.Sequential(
-                    BasicConv(
-                        in_channels=layer_dim,
-                        out_channels=unify_dim,
-                        deconv=False,
-                        is_3d=False,
-                        bn=True,
-                        relu=True,
-                        kernel_size=3,
-                        stride=1,
-                        padding=1,
-                    ),
-                    BasicConv(
-                        in_channels=unify_dim,
-                        out_channels=unify_dim,
-                        deconv=False,
-                        is_3d=False,
-                        bn=True,
-                        relu=True,
-                        kernel_size=1,
-                        stride=1,
-                        padding=0,
-                    ),
-                )
-            )
-
     def forward(self, fmap):
-        fmap_pyramid = [self.unify_layers[0](fmap)]
+        fmap_pyramid = [fmap]
 
-        for i, down_layer in enumerate(self.down_layers):
+        for down_layer in self.down_layers:
             fmap = down_layer(fmap)
 
-            fmap_pyramid.append(self.unify_layers[i + 1](fmap))
+            fmap_pyramid.append(fmap)
         return fmap_pyramid
 
 
@@ -217,21 +186,8 @@ class CostVolume2D(nn.Module):
 
         self.max_disp = max_disp
 
-        self.l_kernels = self.get_conv2d_kernels(reverse=False)
-        self.r_kernels = self.get_conv2d_kernels(reverse=True)
-
-    def get_conv2d_kernels(self, reverse=True):
-        kernels = []
-        for i in range(1, self.max_disp):
-            kernel = np.zeros(shape=[1, 1, 1, i + 1], dtype=np.float32)
-            kernel[0, 0, 0, (0 if reverse else -1)] = 1.0
-            kernel = torch.tensor(kernel, dtype=torch.float32)
-
-            kernels.append(kernel)
-        return kernels
-
     def get_cost_item(self, l_fmap, r_fmap):
-        cost_item = torch.mean(l_fmap * r_fmap, dim=1, keepdim=True)
+        cost_item = torch.mean(l_fmap * r_fmap, dim=1, keepdim=False)
         return cost_item
 
     def make_cost_volume_naive(self, l_fmap, r_fmap):
@@ -239,83 +195,79 @@ class CostVolume2D(nn.Module):
         # right: 1 x 32 x 60 x 80
         # max_disp: 24
         # cost_volume: 1 x 32 x 24 x 60 x 80
-        n, c, h, w = l_fmap.shape
+        w = l_fmap.shape[-1]
 
-        cost_volume = torch.zeros(
-            size=[n, self.max_disp, h, w],
-            dtype=l_fmap.dtype,
-            device=l_fmap.device,
-        )
+        # tensorflow implementation:
+        # def correlation_tf(x, y, max_disp, stride=1, name="corr"):
+        #     with tf.variable_scope(name):
+        #         corr_tensors = []
+        #         y_shape = tf.shape(y)
+        #         y_feature = tf.pad(y, [[0, 0], [0, 0], [max_disp, max_disp], [0, 0]])
+        #         for i in range(-max_disp, max_disp + 1, stride):
+        #             shifted = tf.slice(
+        #                 y_feature,
+        #                 [0, 0, i + max_disp, 0],
+        #                 [-1, y_shape[1], y_shape[2], -1],
+        #             )
+        #             corr_tensors.append(
+        #                 tf.reduce_mean(shifted * x, axis=-1, keepdims=True)
+        #             )
 
-        # for any disparity d:
-        #   cost_volume[:, :, d, :, :d] = 1.0
-        #   cost_volume[:, :, d, :, d:] = left[:, :, :, d:] - right[:, :, :, :-d]
-        cost_volume[:, 0, :, :] = self.get_cost_item(l_fmap, r_fmap).squeeze(1)
-        for d in range(1, self.max_disp):
-            cost_volume[:, d, :, d:] = self.get_cost_item(
-                l_fmap[:, :, :, d:], r_fmap[:, :, :, :-d]
-            ).squeeze(1)
-
-        # cost_volume: 1 x 32 x 24 x 60 x 80
-        return cost_volume
-
-    def make_cost_volume_conv2d(self, l_fmap, r_fmap):
-        c = l_fmap.shape[1]
+        #         result = tf.concat(corr_tensors, axis=-1)
+        #         return result
 
         cost_volume = []
-        for d in range(self.max_disp):
-            if d == 0:
-                cost_volume.append(self.get_cost_item(l_fmap, r_fmap))
-            else:
-                x = F.conv2d(
-                    l_fmap,
-                    self.l_kernels[d - 1].to(l_fmap.device).repeat([c, 1, 1, 1]),
-                    stride=1,
-                    padding=0,
-                    groups=c,
-                )
-                y = F.conv2d(
-                    r_fmap,
-                    self.r_kernels[d - 1].to(r_fmap.device).repeat([c, 1, 1, 1]),
-                    stride=1,
-                    padding=0,
-                    groups=c,
-                )
-                cost_item = self.get_cost_item(x, y)
 
-                cost_volume.append(F.pad(cost_item, [d, 0, 0, 0], value=0.0))
+        r_fmap_pad = F.pad(
+            r_fmap, [self.max_disp, self.max_disp, 0, 0], mode="constant", value=0.0
+        )
+        for d in range(-self.max_disp, self.max_disp + 1, 1):
+            begin = d + self.max_disp
+            end = begin + w
+
+            cost_volume.append(
+                torch.mean(l_fmap * r_fmap_pad[:, :, :, begin:end], dim=1, keepdim=True)
+            )
         cost_volume = torch.concat(cost_volume, dim=1)
         return cost_volume
 
-    def forward(self, l_fmap, r_fmap, use_naive):
-        return (
-            self.make_cost_volume_naive(l_fmap, r_fmap)
-            if use_naive
-            else self.make_cost_volume_conv2d(l_fmap, r_fmap)
-        )
+    def forward(self, l_fmap, r_fmap):
+        return self.make_cost_volume_naive(l_fmap, r_fmap)
 
 
 class DisparityRegress(nn.Module):
     def __init__(
-        self, hidden_dims=[128, 128, 96, 64, 32], max_disp=2, out_dim=1, *args, **kwargs
+        self,
+        in_dim,
+        hidden_dims=[128, 128, 96, 64, 32],
+        max_disp=2,
+        out_dim=1,
+        use_warp_head=True,
+        *args,
+        **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
 
+        self.in_dim = in_dim
         self.hidden_dims = hidden_dims
         self.max_disp = max_disp
-        self.in_dim = max_disp + 1
         self.out_dim = out_dim
+        self.use_warp_head = use_warp_head
 
-        self.warp_header = Warp1DOp(
-            mode="bilinear", padding_mode="border", align_corners=True
-        )
+        self.init_dim = in_dim + (max_disp * 2 + 1)
+
+        if use_warp_head:
+            self.warp_header = Warp1DOp(
+                mode="bilinear", padding_mode="border", align_corners=True
+            )
+            self.init_dim += 1
         self.cost_builder = CostVolume2D(max_disp=max_disp)
 
         conv_layers = nn.ModuleList([])
         for i in range(len(hidden_dims) + 1):
             conv_layers.append(
                 BasicConv(
-                    in_channels=self.in_dim if i == 0 else hidden_dims[i - 1],
+                    in_channels=self.init_dim if i == 0 else hidden_dims[i - 1],
                     out_channels=hidden_dims[i] if i < len(hidden_dims) else out_dim,
                     deconv=False,
                     is_3d=False,
@@ -328,15 +280,10 @@ class DisparityRegress(nn.Module):
             )
         self.conv_layers = nn.Sequential(*conv_layers)
 
-    def forward(self, l_fmap, r_fmap, l_disp_down, is_train):
+    def forward(self, l_fmap, r_fmap, l_disp_down):
         if l_disp_down is None:
-            n, _, h, w = l_fmap.shape
-
-            l_disp_up = torch.zeros(
-                size=[n, 1, h, w], dtype=torch.float32, device=l_fmap.device
-            )
-
             r_fmap_warp = r_fmap
+            l_disp_up = None
         else:
             l_disp_up = (
                 F.interpolate(
@@ -348,8 +295,12 @@ class DisparityRegress(nn.Module):
                 * 2.0
             )
             r_fmap_warp = self.warp_header(r_fmap, l_disp_up)
-        cost_volume = self.cost_builder(l_fmap, r_fmap_warp, is_train)
-        cost_volume = torch.concat((cost_volume, l_disp_up), dim=1)
+        cost_volume = self.cost_builder(l_fmap, r_fmap_warp)
+
+        if l_disp_up is not None:
+            cost_volume = torch.concat((cost_volume, l_fmap, l_disp_up), dim=1)
+        else:
+            cost_volume = torch.concat((cost_volume, l_fmap), dim=1)
         l_disp_up = self.conv_layers(cost_volume)
         return l_disp_up
 
@@ -357,7 +308,7 @@ class DisparityRegress(nn.Module):
 class DisparityRefine(nn.Module):
     def __init__(
         self,
-        unify_dim=64,
+        in_dim,
         refine_dims=[128, 128, 96, 64, 32, 1],
         refine_dilates=[1, 2, 4, 8, 1, 1],
         *args,
@@ -365,7 +316,7 @@ class DisparityRefine(nn.Module):
     ) -> None:
         super().__init__(*args, **kwargs)
 
-        self.unify_dim = unify_dim
+        self.in_dim = in_dim
         self.refine_dims = refine_dims
         self.refine_dilates = refine_dilates
 
@@ -375,7 +326,7 @@ class DisparityRefine(nn.Module):
         for i in range(len(refine_dims)):
             conv_refine_layers.append(
                 BasicConv(
-                    in_channels=(unify_dim + 1) if i == 0 else refine_dims[i - 1],
+                    in_channels=(in_dim + 1) if i == 0 else refine_dims[i - 1],
                     out_channels=refine_dims[i],
                     deconv=False,
                     is_3d=False,
@@ -390,20 +341,18 @@ class DisparityRefine(nn.Module):
         self.conv_refine = nn.Sequential(*conv_refine_layers)
 
     def forward(self, l_disp, l_fmap):
-        return self.conv_refine(torch.concat((l_disp, l_fmap), dim=1))
+        return l_disp + self.conv_refine(torch.concat((l_disp, l_fmap), dim=1))
 
 
 class FastMADNet(nn.Module):
     def __init__(
         self,
         in_dim=3,
-        hidden_dims=[16, 32, 48, 64, 96],
-        regress_dims=[64, 64, 48, 32, 16],
+        hidden_dims=[16, 32, 64, 96, 128, 196],
+        regress_dims=[128, 128, 96, 64, 32],
         max_disp=2,
-        unify_dim=64,
-        refine_dims=[64, 64, 48, 32, 16, 1],
+        refine_dims=[128, 128, 96, 64, 32, 1],
         refine_dilates=[1, 2, 4, 8, 1, 1],
-        use_cascade=True,
         early_stop=2,
         *args,
         **kwargs,
@@ -414,24 +363,38 @@ class FastMADNet(nn.Module):
         self.hidden_dims = hidden_dims
         self.regress_dims = regress_dims
         self.max_disp = max_disp
-        self.unify_dim = unify_dim
         self.refine_dims = refine_dims
         self.refine_dilates = refine_dilates
-        self.use_cascade = use_cascade
         self.early_stop = early_stop
 
-        self.feature_extractor = FeatureExtract(
-            in_dim=in_dim, hidden_dims=hidden_dims, unify_dim=unify_dim
-        )
+        self.feature_extractor = FeatureExtract(in_dim=in_dim, hidden_dims=hidden_dims)
 
-        self.disparity_regressor = DisparityRegress(
-            hidden_dims=regress_dims, max_disp=max_disp, out_dim=1
-        )
-        self.disparity_refiner = DisparityRefine(
-            unify_dim=unify_dim,
-            refine_dims=refine_dims,
-            refine_dilates=refine_dilates,
-        )
+        self.disparity_regressors = nn.ModuleList([])
+        self.disparity_refiners = nn.ModuleList([])
+
+        all_fmap_dims = [in_dim] + hidden_dims
+        for i in range(len(all_fmap_dims)):
+            j = len(all_fmap_dims) - 1 - i
+
+            if j < self.early_stop - 1:
+                break
+
+            self.disparity_regressors.append(
+                DisparityRegress(
+                    in_dim=all_fmap_dims[j],
+                    hidden_dims=regress_dims,
+                    max_disp=max_disp,
+                    out_dim=1,
+                    use_warp_head=(i != 0),
+                )
+            )
+            self.disparity_refiners.append(
+                DisparityRefine(
+                    in_dim=all_fmap_dims[j],
+                    refine_dims=refine_dims,
+                    refine_dilates=refine_dilates,
+                )
+            )
 
     def forward(self, l_img, r_img, is_train):
         l_fmaps = self.feature_extractor(l_img)
@@ -442,21 +405,18 @@ class FastMADNet(nn.Module):
         for i in range(len(l_fmaps)):
             j = len(l_fmaps) - 1 - i
 
-            l_disp = self.disparity_regressor(l_fmaps[j], r_fmaps[j], l_disp, is_train)
+            l_disp = self.disparity_regressors[i](l_fmaps[j], r_fmaps[j], l_disp)
 
-            l_disp_refine = self.disparity_refiner(l_disp, l_fmaps[j])
+            l_disp = self.disparity_refiners[i](l_disp, l_fmaps[j])
 
             if is_train or i == len(l_fmaps) - 1:
-                l_disps.append(l_disp_refine)
-
-            if self.use_cascade:
-                l_disp = l_disp_refine
+                l_disps.append(l_disp)
 
             if j <= self.early_stop - 1:
-                scale = l_img.shape[-1] / l_disp_refine.shape[-1]
+                scale = l_img.shape[-1] / l_disp.shape[-1]
                 l_disp_final = (
                     F.interpolate(
-                        l_disp_refine,
+                        l_disp,
                         size=l_img.shape[-2:],
                         mode="bilinear",
                         align_corners=True,
@@ -470,3 +430,11 @@ class FastMADNet(nn.Module):
             return l_disps, [None] * len(l_disps), [None] * len(l_disps)
         else:
             return [l_disps[-1]]
+
+
+# from tools.profiler import get_model_capacity
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# model = FastMADNet().to(device)
+# model.eval()
+# sample = torch.rand(size=(1, 3, 448, 640), dtype=torch.float32).to(device)
+# _ = get_model_capacity(module=model, inputs=(sample, sample, False), verbose=True)

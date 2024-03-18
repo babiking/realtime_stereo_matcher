@@ -43,5 +43,5 @@ class BasicConv(nn.Module):
         if self.use_bn:
             x = self.bn(x)
         if self.relu:
-            x = nn.LeakyReLU()(x)  # , inplace=True)
+            x = nn.LeakyReLU(0.2)(x)  # , inplace=True)
         return x
