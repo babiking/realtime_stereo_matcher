@@ -7,12 +7,18 @@ from others.fast_mad_net.submodules import BasicConv
 
 class FeatureExtract(nn.Module):
     def __init__(
-        self, in_dim=3, hidden_dims=[16, 32, 64, 96, 128, 192], *args, **kwargs
+        self,
+        in_dim=3,
+        hidden_dims=[16, 32, 64, 96, 128, 192],
+        unify_dim=64,
+        *args,
+        **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
 
         self.in_dim = in_dim
         self.hidden_dims = hidden_dims
+        self.unify_dim = unify_dim
 
         self.down_layers = nn.ModuleList([])
         for i in range(len(hidden_dims)):
@@ -43,14 +49,43 @@ class FeatureExtract(nn.Module):
                 )
             )
 
-    def forward(self, fmap_1x):
-        down_pyramid = [fmap_1x]
+        self.unify_layers = nn.ModuleList([])
+        for layer_dim in [in_dim] + hidden_dims:
+            self.unify_layers.append(
+                nn.Sequential(
+                    BasicConv(
+                        in_channels=layer_dim,
+                        out_channels=unify_dim,
+                        deconv=False,
+                        is_3d=False,
+                        bn=True,
+                        relu=True,
+                        kernel_size=3,
+                        stride=1,
+                        padding=1,
+                    ),
+                    BasicConv(
+                        in_channels=unify_dim,
+                        out_channels=unify_dim,
+                        deconv=False,
+                        is_3d=False,
+                        bn=True,
+                        relu=True,
+                        kernel_size=1,
+                        stride=1,
+                        padding=0,
+                    ),
+                )
+            )
 
-        for down_layer in self.down_layers:
-            fmap_up = down_pyramid[-1]
-            fmap_down = down_layer(fmap_up)
-            down_pyramid.append(fmap_down)
-        return down_pyramid
+    def forward(self, fmap):
+        fmap_pyramid = [self.unify_layers[0](fmap)]
+
+        for i, down_layer in enumerate(self.down_layers):
+            fmap = down_layer(fmap)
+
+            fmap_pyramid.append(self.unify_layers[i + 1](fmap))
+        return fmap_pyramid
 
 
 class Warp1DOp(nn.Module):
@@ -293,44 +328,82 @@ class DisparityRegress(nn.Module):
             )
         self.conv_layers = nn.Sequential(*conv_layers)
 
-    def forward(self, l_fmaps, r_fmaps, is_train):
-        l_disp_pyramid = []
-        for i in range(len(self.hidden_dims) + 1):
-            j = len(self.hidden_dims) - i
+    def forward(self, l_fmap, r_fmap, l_disp_down, is_train):
+        if l_disp_down is None:
+            n, _, h, w = l_fmap.shape
 
-            l_fmap = l_fmaps[j]
+            l_disp_up = torch.zeros(
+                size=[n, 1, h, w], dtype=torch.float32, device=l_fmap.device
+            )
 
-            if i == 0:
-                n, _, h, w = l_fmap.shape
-
-                l_disp_up = torch.zeros(
-                    size=[n, 1, h, w], dtype=torch.float32, device=l_fmap.device
+            r_fmap_warp = r_fmap
+        else:
+            l_disp_up = (
+                F.interpolate(
+                    l_disp_down,
+                    scale_factor=2.0,
+                    mode="bilinear",
+                    align_corners=True,
                 )
-                r_fmap = r_fmaps[j]
-            else:
-                l_disp_up = (
-                    F.interpolate(
-                        l_disp_pyramid[-1],
-                        scale_factor=2.0,
-                        mode="bilinear",
-                        align_corners=True,
-                    )
-                    * 2.0
+                * 2.0
+            )
+            r_fmap_warp = self.warp_header(r_fmap, l_disp_up)
+        cost_volume = self.cost_builder(l_fmap, r_fmap_warp, is_train)
+        cost_volume = torch.concat((cost_volume, l_disp_up), dim=1)
+        l_disp_up = self.conv_layers(cost_volume)
+        return l_disp_up
+
+
+class DisparityRefine(nn.Module):
+    def __init__(
+        self,
+        unify_dim=64,
+        refine_dims=[128, 128, 96, 64, 32, 1],
+        refine_dilates=[1, 2, 4, 8, 1, 1],
+        *args,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+
+        self.unify_dim = unify_dim
+        self.refine_dims = refine_dims
+        self.refine_dilates = refine_dilates
+
+        assert len(self.refine_dims) == len(self.refine_dilates)
+
+        conv_refine_layers = nn.ModuleList([])
+        for i in range(len(refine_dims)):
+            conv_refine_layers.append(
+                BasicConv(
+                    in_channels=(unify_dim + 1) if i == 0 else refine_dims[i - 1],
+                    out_channels=refine_dims[i],
+                    deconv=False,
+                    is_3d=False,
+                    bn=True,
+                    relu=True,
+                    kernel_size=3,
+                    stride=1,
+                    padding=refine_dilates[i],
+                    dilation=refine_dilates[i],
                 )
-                r_fmap = self.warp_header(r_fmaps[j], l_disp_up)
-            cost_volume = self.cost_builder(l_fmap, r_fmap, is_train)
-            cost_volume = torch.concat((cost_volume, l_disp_up), dim=1)
-            l_disp_pyramid.append(self.conv_layers(cost_volume))
-        return l_disp_pyramid
+            )
+        self.conv_refine = nn.Sequential(*conv_refine_layers)
+
+    def forward(self, l_disp, l_fmap):
+        return self.conv_refine(torch.concat((l_disp, l_fmap), dim=1))
 
 
 class FastMADNet(nn.Module):
     def __init__(
         self,
         in_dim=3,
-        hidden_dims=[16, 32, 64, 96, 128, 192],
-        regress_dims=[128, 128, 96, 64, 32],
+        hidden_dims=[16, 32, 48, 64, 96, 128],
+        regress_dims=[64, 64, 48, 32, 16],
         max_disp=2,
+        unify_dim=64,
+        refine_dims=[64, 64, 48, 32, 16, 1],
+        refine_dilates=[1, 2, 4, 8, 1, 1],
+        use_cascade=True,
         *args,
         **kwargs,
     ) -> None:
@@ -340,19 +413,47 @@ class FastMADNet(nn.Module):
         self.hidden_dims = hidden_dims
         self.regress_dims = regress_dims
         self.max_disp = max_disp
+        self.unify_dim = unify_dim
+        self.refine_dims = refine_dims
+        self.refine_dilates = refine_dilates
+        self.use_cascade = use_cascade
 
-        self.feature_extractor = FeatureExtract(in_dim=in_dim, hidden_dims=hidden_dims)
+        self.feature_extractor = FeatureExtract(
+            in_dim=in_dim, hidden_dims=hidden_dims, unify_dim=unify_dim
+        )
+
         self.disparity_regressor = DisparityRegress(
             hidden_dims=regress_dims, max_disp=max_disp, out_dim=1
+        )
+        self.disparity_refiner = DisparityRefine(
+            unify_dim=unify_dim,
+            refine_dims=refine_dims,
+            refine_dilates=refine_dilates,
         )
 
     def forward(self, l_img, r_img, is_train):
         l_fmaps = self.feature_extractor(l_img)
         r_fmaps = self.feature_extractor(r_img)
 
-        l_disp_pyramid = self.disparity_regressor(l_fmaps, r_fmaps, is_train)
+        l_disp = None
+        l_disps = []
+        for i in range(len(l_fmaps)):
+            j = len(l_fmaps) - 1 - i
 
-        print()
+            l_disp = self.disparity_regressor(l_fmaps[j], r_fmaps[j], l_disp, is_train)
+
+            l_disp_refine = self.disparity_refiner(l_disp, l_fmaps[j])
+
+            if is_train or i == len(l_fmaps) - 1:
+                l_disps.append(l_disp_refine)
+            
+            if self.use_cascade:
+                l_disp = l_disp_refine
+        
+        if is_train:
+            return l_disps, l_fmaps, r_fmaps
+        else:
+            return l_disps
 
 
 from tools.profiler import get_model_capacity
