@@ -146,7 +146,7 @@ class Warp1DOp(nn.Module):
         n, _, h, w = img.shape
 
         x = torch.arange(w, device=img.device, dtype=img.dtype)
-        x = x[None, None, None, :].repeat([n, 1, h, 1])
+        x = x[None, None, None, :].repeat([1, 1, h, 1])
         x = x - disp
 
         x = self.process_grid_coordinates(x, w)
@@ -432,9 +432,9 @@ class FastMADNet(nn.Module):
             return [l_disps[-1]]
 
 
-# from tools.profiler import get_model_capacity
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# model = FastMADNet().to(device)
-# model.eval()
-# sample = torch.rand(size=(1, 3, 448, 640), dtype=torch.float32).to(device)
-# _ = get_model_capacity(module=model, inputs=(sample, sample, False), verbose=True)
+from tools.profiler import get_model_capacity
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = FastMADNet().to(device)
+model.eval()
+sample = torch.rand(size=(1, 3, 448, 640), dtype=torch.float32).to(device)
+_ = get_model_capacity(module=model, inputs=(sample, sample, False), verbose=True)
