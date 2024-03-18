@@ -397,13 +397,14 @@ class FastMADNet(nn.Module):
     def __init__(
         self,
         in_dim=3,
-        hidden_dims=[16, 32, 48, 64, 96, 128],
+        hidden_dims=[16, 32, 48, 64, 96],
         regress_dims=[64, 64, 48, 32, 16],
         max_disp=2,
         unify_dim=64,
         refine_dims=[64, 64, 48, 32, 16, 1],
         refine_dilates=[1, 2, 4, 8, 1, 1],
         use_cascade=True,
+        early_stop=2,
         *args,
         **kwargs,
     ) -> None:
@@ -417,6 +418,7 @@ class FastMADNet(nn.Module):
         self.refine_dims = refine_dims
         self.refine_dilates = refine_dilates
         self.use_cascade = use_cascade
+        self.early_stop = early_stop
 
         self.feature_extractor = FeatureExtract(
             in_dim=in_dim, hidden_dims=hidden_dims, unify_dim=unify_dim
@@ -446,19 +448,25 @@ class FastMADNet(nn.Module):
 
             if is_train or i == len(l_fmaps) - 1:
                 l_disps.append(l_disp_refine)
-            
+
             if self.use_cascade:
                 l_disp = l_disp_refine
-        
+
+            if j <= self.early_stop - 1:
+                scale = l_img.shape[-1] / l_disp_refine.shape[-1]
+                l_disp_final = (
+                    F.interpolate(
+                        l_disp_refine,
+                        size=l_img.shape[-2:],
+                        mode="bilinear",
+                        align_corners=True,
+                    )
+                    * scale
+                )
+                l_disps.append(l_disp_final)
+                break
+
         if is_train:
-            return l_disps, l_fmaps, r_fmaps
+            return l_disps, [None] * len(l_disps), [None] * len(l_disps)
         else:
-            return l_disps
-
-
-from tools.profiler import get_model_capacity
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = FastMADNet().to(device)
-sample = torch.rand(size=(1, 3, 448, 640), dtype=torch.float32).to(device)
-_ = get_model_capacity(module=model, inputs=(sample, sample, False), verbose=True)
+            return [l_disps[-1]]
