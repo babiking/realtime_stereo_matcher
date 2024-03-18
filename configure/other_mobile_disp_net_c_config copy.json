@@ -1,5 +1,5 @@
 {
-    "name": "MOBILE_DISP_NET_C_REPRODUCE_POST",
+    "name": "FA",
     "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/MOBILE_DISP_NET_C_REPRODUCE_POST",
     "train": {
         "batch_size": 8,

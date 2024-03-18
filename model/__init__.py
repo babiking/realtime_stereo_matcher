@@ -10,6 +10,7 @@ from model.opencv_sgbm_module import OpenCVSGBMModule
 from others.fast_acv_net.fast_acv_net import Fast_ACVNet
 from others.fast_acv_net.fast_acv_net_simple import FastACVNetSimple
 from others.mobile_disp_net_c.mobile_disp_net_c import MobileDispNetC
+from others.mobile_disp_net_c.fast_disp_net_c import FastDispNetC
 
 
 def build_model(model_config):
@@ -37,5 +38,7 @@ def build_model(model_config):
         return FastACVNetSimple(**model_config["parameters"])
     elif model_config["type"] == "MobileDispNetC":
         return MobileDispNetC(**model_config["parameters"])
+    elif model_config["type"] == "FastDispNetC":
+        return FastDispNetC(**model_config["parameters"])
     else:
         raise NotImplementedError("unsupport model: {}".format(model_config["type"]))
