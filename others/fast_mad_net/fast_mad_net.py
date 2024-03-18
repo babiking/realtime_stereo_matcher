@@ -369,32 +369,26 @@ class FastMADNet(nn.Module):
 
         self.feature_extractor = FeatureExtract(in_dim=in_dim, hidden_dims=hidden_dims)
 
+        part_fmap_dims = [in_dim] + hidden_dims
+        part_fmap_dims = np.flip(part_fmap_dims[self.early_stop :])
+
         self.disparity_regressors = nn.ModuleList([])
-        self.disparity_refiners = nn.ModuleList([])
-
-        all_fmap_dims = [in_dim] + hidden_dims
-        for i in range(len(all_fmap_dims)):
-            j = len(all_fmap_dims) - 1 - i
-
-            if j < self.early_stop - 1:
-                break
-
+        for i, fmap_dim in enumerate(part_fmap_dims):
             self.disparity_regressors.append(
                 DisparityRegress(
-                    in_dim=all_fmap_dims[j],
+                    in_dim=fmap_dim,
                     hidden_dims=regress_dims,
                     max_disp=max_disp,
                     out_dim=1,
                     use_warp_head=(i != 0),
                 )
             )
-            self.disparity_refiners.append(
-                DisparityRefine(
-                    in_dim=all_fmap_dims[j],
-                    refine_dims=refine_dims,
-                    refine_dilates=refine_dilates,
-                )
-            )
+
+        self.disparity_refiner = DisparityRefine(
+            in_dim=part_fmap_dims[-1],
+            refine_dims=refine_dims,
+            refine_dilates=refine_dilates,
+        )
 
     def forward(self, l_img, r_img, is_train):
         l_fmaps = self.feature_extractor(l_img)
@@ -402,29 +396,29 @@ class FastMADNet(nn.Module):
 
         l_disp = None
         l_disps = []
-        for i in range(len(l_fmaps)):
+        for i in range(len(self.disparity_regressors)):
             j = len(l_fmaps) - 1 - i
 
             l_disp = self.disparity_regressors[i](l_fmaps[j], r_fmaps[j], l_disp)
 
-            l_disp = self.disparity_refiners[i](l_disp, l_fmaps[j])
+            if i == len(self.disparity_regressors) - 1:
+                l_disp = self.disparity_refiner(l_disp, l_fmaps[j])
 
-            if is_train or i == len(l_fmaps) - 1:
+            if is_train or (self.early_stop > 0 and i == len(self.disparity_regressors) - 1):
                 l_disps.append(l_disp)
 
-            if j <= self.early_stop - 1:
-                scale = l_img.shape[-1] / l_disp.shape[-1]
-                l_disp_final = (
-                    F.interpolate(
-                        l_disp,
-                        size=l_img.shape[-2:],
-                        mode="bilinear",
-                        align_corners=True,
-                    )
-                    * scale
+        if self.early_stop > 0:
+            scale = l_img.shape[-1] / l_disps[-1].shape[-1]
+            l_disp_final = (
+                F.interpolate(
+                    l_disps[-1],
+                    size=l_img.shape[-2:],
+                    mode="bilinear",
+                    align_corners=True,
                 )
-                l_disps.append(l_disp_final)
-                break
+                * scale
+            )
+            l_disps.append(l_disp_final)
 
         if is_train:
             return l_disps, [None] * len(l_disps), [None] * len(l_disps)
@@ -433,6 +427,7 @@ class FastMADNet(nn.Module):
 
 
 from tools.profiler import get_model_capacity
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = FastMADNet().to(device)
 model.eval()
