@@ -1,0 +1,91 @@
+{
+    "name": "FAST_MAD_NET",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/FAST_MAD_NET",
+    "train": {
+        "batch_size": 8,
+        "restore_checkpoint": "",
+        "save_checkpoint_frequency": 10000,
+        "datasets": [
+            "middlebury_Q",
+            "eth3d",
+            "sceneflow/things",
+            "sceneflow/driving",
+            "kitti"
+        ],
+        "learn_rate": 0.0002,
+        "num_of_steps": 200000,
+        "weight_decay": 0.00001,
+        "loss": [
+            {
+                "type": "SequenceLoss",
+                "parameters": {
+                    "loss_gamma": 0.32,
+                    "max_flow_magnitude": 700
+                }
+            }
+        ]
+    },
+    "test": {
+        "datasets": [
+            "realsense_test",
+            "middlebury_Q",
+            "kitti"
+        ]
+    },
+    "model": {
+        "type": "FastMADNet",
+        "parameters": {
+            "in_dim": 3,
+            "hidden_dims": [
+                16,
+                32,
+                64,
+                96,
+                128,
+                196
+            ],
+            "regress_dims": [
+                128,
+                128,
+                96,
+                64,
+                32
+            ],
+            "max_disp": 2,
+            "refine_dims": [
+                128,
+                128,
+                96,
+                64,
+                32,
+                1
+            ],
+            "refine_dilates": [
+                1,
+                2,
+                4,
+                8,
+                1,
+                1
+            ],
+            "early_stop": 2
+        }
+    },
+    "data": {
+        "image_size": [
+            256,
+            320
+        ],
+        "image_gamma": [],
+        "spatial_scale": [
+            -0.2,
+            0.4
+        ],
+        "saturation_range": [
+            0,
+            1.4
+        ],
+        "do_flip": false,
+        "no_y_jitter": false
+    }
+}
