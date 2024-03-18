@@ -11,6 +11,89 @@ from torch.nn.init import kaiming_normal
 from others.mobile_disp_net_c.submodules import *
 
 
+class CostVolume2D(nn.Module):
+    def __init__(self, hidden_dim, max_disp, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        self.hidden_dim = hidden_dim
+        self.max_disp = max_disp
+
+        self.l_kernels = self.get_conv2d_kernels(reverse=False)
+        self.r_kernels = self.get_conv2d_kernels(reverse=True)
+
+    def get_conv2d_kernels(self, reverse=True):
+        kernels = []
+        for i in range(1, self.max_disp):
+            kernel = np.zeros(shape=[self.hidden_dim, 1, 1, i + 1], dtype=np.float32)
+            kernel[:, 0, 0, (0 if reverse else -1)] = 1.0
+            kernel = torch.tensor(kernel, dtype=torch.float32)
+
+            kernels.append(kernel)
+        return kernels
+
+    def get_cost_item(self, l_fmap, r_fmap):
+        cost_item = torch.mean(l_fmap * r_fmap, dim=1, keepdim=True)
+        return cost_item
+
+    def make_cost_volume_naive(self, l_fmap, r_fmap):
+        # left: 1 x 32 x 60 x 80
+        # right: 1 x 32 x 60 x 80
+        # max_disp: 24
+        # cost_volume: 1 x 32 x 24 x 60 x 80
+        n, c, h, w = l_fmap.shape
+
+        cost_volume = torch.zeros(
+            size=[n, self.max_disp, h, w],
+            dtype=l_fmap.dtype,
+            device=l_fmap.device,
+        )
+
+        # for any disparity d:
+        #   cost_volume[:, :, d, :, :d] = 1.0
+        #   cost_volume[:, :, d, :, d:] = left[:, :, :, d:] - right[:, :, :, :-d]
+        cost_volume[:, 0, :, :] = self.get_cost_item(l_fmap, r_fmap)
+        for d in range(1, self.max_disp):
+            cost_volume[:, d, :, d:] = self.get_cost_item(
+                l_fmap[:, :, :, d:], r_fmap[:, :, :, :-d]
+            )
+
+        # cost_volume: 1 x 32 x 24 x 60 x 80
+        return cost_volume
+
+    def make_cost_volume_conv2d(self, l_fmap, r_fmap):
+        cost_volume = []
+        for d in range(self.max_disp):
+            if d == 0:
+                cost_volume.append(self.get_cost_item(l_fmap, r_fmap))
+            else:
+                x = F.conv2d(
+                    l_fmap,
+                    self.l_kernels[d - 1].to(l_fmap.device),
+                    stride=1,
+                    padding=0,
+                    groups=self.hidden_dim,
+                )
+                y = F.conv2d(
+                    r_fmap,
+                    self.r_kernels[d - 1].to(r_fmap.device),
+                    stride=1,
+                    padding=0,
+                    groups=self.hidden_dim,
+                )
+                cost_item = self.get_cost_item(x, y)
+
+                cost_volume.append(F.pad(cost_item, [d, 0, 0, 0], value=0.0))
+        cost_volume = torch.concat(cost_volume, dim=1)
+        return cost_volume
+
+    def forward(self, l_fmap, r_fmap, use_naive):
+        return (
+            self.make_cost_volume_naive(l_fmap, r_fmap)
+            if use_naive
+            else self.make_cost_volume_conv2d(l_fmap, r_fmap)
+        )
+
+
 class MobileDispNetC(nn.Module):
     def __init__(
         self,
@@ -90,6 +173,8 @@ class MobileDispNetC(nn.Module):
         else:
             self.disp_expand = ResBlock(16, self.maxdisp)
 
+        self.cost_volume = CostVolume2D(hidden_dim=256, max_disp=40)
+
         # weight initialization
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
@@ -116,7 +201,7 @@ class MobileDispNetC(nn.Module):
 
         # Correlate corr3a_l and corr3a_r
         # out_corr = self.corr(conv3a_l, conv3a_r)
-        out_corr = build_corr(conv3a_l, conv3a_r, max_disp=40)
+        out_corr = self.cost_volume(conv3a_l, conv3a_r, is_train)
         out_corr = self.corr_activation(out_corr)
         out_conv3a_redir = self.conv_redir(conv3a_l)  # 256-32
         in_conv3b = torch.cat((out_conv3a_redir, out_corr), 1)  # 32+40
@@ -172,7 +257,7 @@ class MobileDispNetC(nn.Module):
             pr0 = disparity_regression(pr0, self.maxdisp)
 
         if is_train:
-            disps = [pr3, pr2, pr1, pr0]
+            disps = [pr5, pr4, pr3, pr2, pr1, pr0]
             return disps, [None] * len(disps), [None] * len(disps)
         else:
             return [pr0]
