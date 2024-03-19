@@ -344,7 +344,7 @@ class DisparityRefine(nn.Module):
                 )
             )
         self.conv_refine = nn.Sequential(*conv_refine_layers)
-        self.relu = nn.LeakyReLU(0.2)
+        self.relu = nn.ReLU()
 
     def forward(self, l_disp, l_fmap):
         return self.relu(
