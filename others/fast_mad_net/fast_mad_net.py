@@ -222,7 +222,7 @@ class CostVolume2D(nn.Module):
             r_fmap, [self.max_disp, self.max_disp, 0, 0], mode="constant", value=0.0
         )
         for d in range(-self.max_disp, self.max_disp + 1, 1):
-            begin = d + self.max_disp
+            begin = self.max_disp - d
             end = begin + w
 
             cost_volume.append(
@@ -243,7 +243,7 @@ class DisparityRegress(nn.Module):
         max_disp=2,
         out_dim=1,
         use_warp_head=True,
-        scale_level=1,
+        scale_level=0,
         *args,
         **kwargs,
     ) -> None:
@@ -255,8 +255,8 @@ class DisparityRegress(nn.Module):
         self.out_dim = out_dim
         self.use_warp_head = use_warp_head
 
-        self.scale_level = scale_level
-        self.scale_disp = self.max_disp**scale_level
+        self.scale_factor = 2**scale_level
+        self.scale_disp = self.max_disp * self.scale_factor
 
         self.init_dim = in_dim + (max_disp * 2 + 1)
 
@@ -303,10 +303,10 @@ class DisparityRegress(nn.Module):
         cost_volume = self.cost_builder(l_fmap, r_fmap_warp)
 
         if l_disp_up is not None:
-            cost_volume = torch.concat((cost_volume, l_fmap, l_disp_up), dim=1)
+            cost_volume = torch.concat((cost_volume, l_fmap, l_disp_up / self.scale_disp), dim=1)
         else:
             cost_volume = torch.concat((cost_volume, l_fmap), dim=1)
-        l_disp_up = self.relu(self.conv_layers(cost_volume) * self.scale_disp)
+        l_disp_up = self.conv_layers(cost_volume) * self.scale_disp
         return l_disp_up
 
 
@@ -389,7 +389,7 @@ class FastMADNet(nn.Module):
                     max_disp=max_disp,
                     out_dim=1,
                     use_warp_head=(i != 0),
-                    scale_level=(i + 1),
+                    scale_level=i,
                 )
             )
 
