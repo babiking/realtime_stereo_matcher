@@ -426,10 +426,10 @@ class FastMADNet(nn.Module):
             return [l_disps[-1]]
 
 
-from tools.profiler import get_model_capacity
+# from tools.profiler import get_model_capacity
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = FastMADNet().to(device)
-model.eval()
-sample = torch.rand(size=(1, 3, 448, 640), dtype=torch.float32).to(device)
-_ = get_model_capacity(module=model, inputs=(sample, sample, False), verbose=True)
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# model = FastMADNet().to(device)
+# model.eval()
+# sample = torch.rand(size=(1, 3, 448, 640), dtype=torch.float32).to(device)
+# _ = get_model_capacity(module=model, inputs=(sample, sample, False), verbose=True)
