@@ -243,6 +243,7 @@ class DisparityRegress(nn.Module):
         max_disp=2,
         out_dim=1,
         use_warp_head=True,
+        scale_level=1,
         *args,
         **kwargs,
     ) -> None:
@@ -253,6 +254,9 @@ class DisparityRegress(nn.Module):
         self.max_disp = max_disp
         self.out_dim = out_dim
         self.use_warp_head = use_warp_head
+
+        self.scale_level = scale_level
+        self.scale_disp = self.max_disp**scale_level
 
         self.init_dim = in_dim + (max_disp * 2 + 1)
 
@@ -271,7 +275,7 @@ class DisparityRegress(nn.Module):
                     out_channels=hidden_dims[i] if i < len(hidden_dims) else out_dim,
                     deconv=False,
                     is_3d=False,
-                    bn=bool(i < len(hidden_dims)),
+                    bn=True,
                     relu=bool(i < len(hidden_dims)),
                     kernel_size=3,
                     stride=1,
@@ -293,6 +297,7 @@ class DisparityRegress(nn.Module):
                     align_corners=True,
                 )
                 * 2.0
+                / self.scale_disp
             )
             r_fmap_warp = self.warp_header(r_fmap, l_disp_up)
         cost_volume = self.cost_builder(l_fmap, r_fmap_warp)
@@ -301,7 +306,7 @@ class DisparityRegress(nn.Module):
             cost_volume = torch.concat((cost_volume, l_fmap, l_disp_up), dim=1)
         else:
             cost_volume = torch.concat((cost_volume, l_fmap), dim=1)
-        l_disp_up = self.conv_layers(cost_volume)
+        l_disp_up = self.conv_layers(cost_volume) * self.scale_disp
         return l_disp_up
 
 
@@ -341,7 +346,7 @@ class DisparityRefine(nn.Module):
         self.conv_refine = nn.Sequential(*conv_refine_layers)
 
     def forward(self, l_disp, l_fmap):
-        return F.relu(l_disp + self.conv_refine(torch.concat((l_fmap, l_disp), dim=1)))
+        return l_disp + self.conv_refine(torch.concat((l_fmap, l_disp), dim=1))
 
 
 class FastMADNet(nn.Module):
@@ -381,6 +386,7 @@ class FastMADNet(nn.Module):
                     max_disp=max_disp,
                     out_dim=1,
                     use_warp_head=(i != 0),
+                    scale_level=(i + 1)
                 )
             )
 
@@ -404,7 +410,9 @@ class FastMADNet(nn.Module):
             if i == len(self.disparity_regressors) - 1:
                 l_disp = self.disparity_refiner(l_disp, l_fmaps[j])
 
-            if is_train or (self.early_stop > 0 and i == len(self.disparity_regressors) - 1):
+            if is_train or (
+                self.early_stop > 0 and i == len(self.disparity_regressors) - 1
+            ):
                 l_disps.append(l_disp)
 
         if self.early_stop > 0:
