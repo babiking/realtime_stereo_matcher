@@ -362,6 +362,7 @@ class FastMADNet(nn.Module):
         refine_dims=[128, 128, 96, 64, 32, 1],
         refine_dilates=[1, 2, 4, 8, 1, 1],
         early_stop=2,
+        use_final_only=False,
         *args,
         **kwargs,
     ) -> None:
@@ -374,6 +375,7 @@ class FastMADNet(nn.Module):
         self.refine_dims = refine_dims
         self.refine_dilates = refine_dilates
         self.early_stop = early_stop
+        self.use_final_only = use_final_only
 
         self.feature_extractor = FeatureExtract(in_dim=in_dim, hidden_dims=hidden_dims)
 
@@ -430,6 +432,9 @@ class FastMADNet(nn.Module):
                 * scale
             )
             l_disps.append(l_disp_final)
+
+        if self.use_final_only:
+            l_disps = [l_disps[-1]]
 
         if is_train:
             return l_disps, [None] * len(l_disps), [None] * len(l_disps)

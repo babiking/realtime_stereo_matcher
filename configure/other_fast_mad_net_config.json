@@ -68,7 +68,8 @@
                 1,
                 1
             ],
-            "early_stop": 2
+            "early_stop": 2,
+            "use_final_only": false
         }
     },
     "data": {
