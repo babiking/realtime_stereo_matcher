@@ -283,6 +283,7 @@ class DisparityRegress(nn.Module):
                 ),
             )
         self.conv_layers = nn.Sequential(*conv_layers)
+        self.relu = nn.LeakyReLU(0.2)
 
     def forward(self, l_fmap, r_fmap, l_disp_down):
         if l_disp_down is None:
@@ -297,7 +298,6 @@ class DisparityRegress(nn.Module):
                     align_corners=True,
                 )
                 * 2.0
-                / self.scale_disp
             )
             r_fmap_warp = self.warp_header(r_fmap, l_disp_up)
         cost_volume = self.cost_builder(l_fmap, r_fmap_warp)
@@ -306,7 +306,7 @@ class DisparityRegress(nn.Module):
             cost_volume = torch.concat((cost_volume, l_fmap, l_disp_up), dim=1)
         else:
             cost_volume = torch.concat((cost_volume, l_fmap), dim=1)
-        l_disp_up = self.conv_layers(cost_volume) * self.scale_disp
+        l_disp_up = self.relu(self.conv_layers(cost_volume) * self.scale_disp)
         return l_disp_up
 
 
@@ -335,7 +335,7 @@ class DisparityRefine(nn.Module):
                     out_channels=refine_dims[i],
                     deconv=False,
                     is_3d=False,
-                    bn=bool(i < len(refine_dims) - 1),
+                    bn=True,
                     relu=bool(i < len(refine_dims) - 1),
                     kernel_size=3,
                     stride=1,
@@ -344,9 +344,12 @@ class DisparityRefine(nn.Module):
                 )
             )
         self.conv_refine = nn.Sequential(*conv_refine_layers)
+        self.relu = nn.LeakyReLU(0.2)
 
     def forward(self, l_disp, l_fmap):
-        return l_disp + self.conv_refine(torch.concat((l_fmap, l_disp), dim=1))
+        return self.relu(
+            l_disp + self.conv_refine(torch.concat((l_fmap, l_disp), dim=1))
+        )
 
 
 class FastMADNet(nn.Module):
@@ -386,7 +389,7 @@ class FastMADNet(nn.Module):
                     max_disp=max_disp,
                     out_dim=1,
                     use_warp_head=(i != 0),
-                    scale_level=(i + 1)
+                    scale_level=(i + 1),
                 )
             )
 
