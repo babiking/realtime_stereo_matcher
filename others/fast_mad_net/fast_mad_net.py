@@ -271,8 +271,8 @@ class DisparityRegress(nn.Module):
                     out_channels=hidden_dims[i] if i < len(hidden_dims) else out_dim,
                     deconv=False,
                     is_3d=False,
-                    bn=True,
-                    relu=True,
+                    bn=bool(i < len(hidden_dims)),
+                    relu=bool(i < len(hidden_dims)),
                     kernel_size=3,
                     stride=1,
                     padding=1,
@@ -330,8 +330,8 @@ class DisparityRefine(nn.Module):
                     out_channels=refine_dims[i],
                     deconv=False,
                     is_3d=False,
-                    bn=True,
-                    relu=True,
+                    bn=bool(i < len(refine_dims) - 1),
+                    relu=bool(i < len(refine_dims) - 1),
                     kernel_size=3,
                     stride=1,
                     padding=refine_dilates[i],
@@ -341,7 +341,7 @@ class DisparityRefine(nn.Module):
         self.conv_refine = nn.Sequential(*conv_refine_layers)
 
     def forward(self, l_disp, l_fmap):
-        return l_disp + self.conv_refine(torch.concat((l_disp, l_fmap), dim=1))
+        return F.relu(l_disp + self.conv_refine(torch.concat((l_fmap, l_disp), dim=1)))
 
 
 class FastMADNet(nn.Module):
