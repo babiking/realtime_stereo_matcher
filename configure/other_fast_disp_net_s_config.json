@@ -1,16 +1,17 @@
 {
-    "name": "FAST_DISP_NET_S_REPRODUCE",
-    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/FAST_DISP_NET_S_REPRODUCE",
+    "name": "FAST_DISP_NET_S_POST",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/FAST_DISP_NET_S_POST",
     "train": {
         "batch_size": 8,
-        "restore_checkpoint": "",
+        "restore_checkpoint": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/FAST_DISP_NET_S_REPRODUCE/checkpoints/FAST_DISP_NET_S_REPRODUCE-epoch-190000.pth.gz",
         "save_checkpoint_frequency": 10000,
         "datasets": [
             "middlebury_Q",
             "eth3d",
             "sceneflow/things",
             "sceneflow/driving",
-            "kitti"
+            "kitti",
+            "realsense_train"
         ],
         "learn_rate": 0.0002,
         "num_of_steps": 200000,
