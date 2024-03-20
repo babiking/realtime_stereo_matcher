@@ -1,9 +1,9 @@
 {
-    "name": "FAST_MAD_NET",
-    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/FAST_MAD_NET",
+    "name": "FAST_MAD_NET_POST",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/FAST_MAD_NET_POST",
     "train": {
         "batch_size": 8,
-        "restore_checkpoint": "",
+        "restore_checkpoint": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/FAST_MAD_NET/checkpoints/FAST_MAD_NET-epoch-240000.pth.gz",
         "save_checkpoint_frequency": 10000,
         "datasets": [
             "middlebury_Q",
@@ -69,13 +69,13 @@
                 1
             ],
             "early_stop": 2,
-            "use_final_only": false
+            "use_final_only": true
         }
     },
     "data": {
         "image_size": [
-            256,
-            320
+            512,
+            640
         ],
         "image_gamma": [],
         "spatial_scale": [
