@@ -552,7 +552,9 @@ class MobileStereoNetV9(SubModule):
             )
 
         self.cost_aggregate = CostAggregate3D(in_dim=8, fmap_dim=64)
-        self.cost_patch = BasicConv(24, 48, kernel_size=1, stride=1, padding=0)
+        self.cost_patch = BasicConv(
+            24, 48, kernel_size=1, stride=1, padding=0, bn=False, relu=False
+        )
         self.propagation = Propagation()
         self.propagation_prob = Propagation_prob()
 
