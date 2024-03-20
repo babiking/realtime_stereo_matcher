@@ -635,7 +635,7 @@ class MobileStereoNetV9(SubModule):
             disp_match_4x = 1.0
 
         # disp_match_4x: 1 x 5 x 120 x 160, cross shape propagation weights, W_m_i
-        disp_match_4x = F.normalize(disp_match_4x * disp_var_4x, p=2.0, dim=1)
+        disp_match_4x = F.softmax(disp_match_4x * disp_var_4x, dim=1)
 
         # cost_weights_4x: 1 x 5 x 48 x 120 x 160, cost volume after VAP, V_p_i_d
         cost_weights_4x = self.propagation_prob(cost_weights_4x.unsqueeze(1))
