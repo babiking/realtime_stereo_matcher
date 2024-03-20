@@ -6,10 +6,14 @@
         "restore_checkpoint": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/200K_STEREO_NET_V3/checkpoints/200K_STEREO_NET_V3-epoch-200000.pth.gz",
         "save_checkpoint_frequency": 1000,
         "datasets": [
-            "realsense_train"
+            "middlebury_2014",
+            "eth3d",
+            "sceneflow/things",
+            "sceneflow/driving",
+            "kitti"
         ],
         "learn_rate": 0.000004,
-        "num_of_steps": 30000,
+        "num_of_steps": 80000,
         "weight_decay": 0.00001,
         "loss": {
             "type": "SequenceLoss",
