@@ -376,19 +376,6 @@ class GroupwiseCostVolume3D(nn.Module):
         self.max_disp = max_disp
         self.num_cost_groups = num_cost_groups
 
-        self.l_kernels = self.get_conv2d_kernels(reverse=False)
-        self.r_kernels = self.get_conv2d_kernels(reverse=True)
-
-    def get_conv2d_kernels(self, reverse=True):
-        kernels = []
-        for i in range(1, self.max_disp):
-            kernel = np.zeros(shape=[self.hidden_dim, 1, 1, i + 1], dtype=np.float32)
-            kernel[:, 0, 0, (0 if reverse else -1)] = 1.0
-            kernel = torch.tensor(kernel, dtype=torch.float32)
-
-            kernels.append(kernel)
-        return kernels
-
     def get_cost_item(self, l_fmap, r_fmap):
         n, c, h, w = l_fmap.shape
         assert c % self.num_cost_groups == 0
