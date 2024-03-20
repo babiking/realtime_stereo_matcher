@@ -45,7 +45,7 @@
             ],
             "hidden_dim": 32,
             "use_groupwise_cost": false,
-            "num_groups": 8
+            "early_stop": 2
         }
     },
     "data": {

@@ -219,14 +219,14 @@ class Warp1DOp(nn.Module):
             v_x0 = torch.gather(img, dim=-1, index=x0.expand_as(img))
             v_x1 = torch.gather(img, dim=-1, index=x1.expand_as(img))
 
-            warped = ((1.0 - dx) * v_x0 + dx * v_x1)
-                
+            warped = (1.0 - dx) * v_x0 + dx * v_x1
+
         elif self.mode == "nearest":
             x0 = torch.round(x).type(dtype=torch.int64)
-            warped = torch.gather(img, dim=-1, index=x0.expand_as(img))                
+            warped = torch.gather(img, dim=-1, index=x0.expand_as(img))
         else:
             raise NotImplementedError
-        
+
         if self.padding_mode == "zeros":
             warped = warped[:, :, :, 1:-1]
         return warped
@@ -435,11 +435,14 @@ class MobileStereoNetV3(nn.Module):
         num_groups=8,
         use_conv2d_cost=True,
         use_warp_feature=True,
+        early_stop=2,
     ):
         super().__init__()
         self.down_factor = down_factor
         self.align = 2**self.down_factor
         self.max_disp = (max_disp + 1) // (2**self.down_factor)
+
+        self.early_stop = early_stop
 
         self.refine_dilates = refine_dilates
         self.hidden_dim = hidden_dim
@@ -485,7 +488,7 @@ class MobileStereoNetV3(nn.Module):
                     refine_dilates=self.refine_dilates,
                     use_warp_feature=self.use_warp_feature,
                 )
-                for _ in range(self.down_factor)
+                for _ in range(self.down_factor - self.early_stop)
             ]
         )
 
@@ -526,4 +529,22 @@ class MobileStereoNetV3(nn.Module):
 
             if is_train or i == len(self.refine_layers) - 1:
                 multi_scale.append(x)
-        return (multi_scale, l_fmaps, r_fmaps) if is_train else multi_scale
+
+        if self.early_stop > 0:
+            scale = float(l_img.shape[-1]) / multi_scale[-1].shape[-1]
+
+            disp_final = (
+                F.interpolate(
+                    multi_scale[-1],
+                    size=(l_img.shape[-2:]),
+                    mode="bilinear",
+                    align_corners=False,
+                )
+                * scale
+            )
+            multi_scale.append(disp_final)
+
+        if is_train:
+            return multi_scale, [None] * len(multi_scale), [None] * len(multi_scale)
+        else:
+            return [multi_scale[-1]]
