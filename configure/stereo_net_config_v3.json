@@ -25,9 +25,9 @@
     },
     "test": {
         "datasets": [
+            "realsense_test",
             "middlebury_Q",
-            "eth3d",
-            "realsense"
+            "kitti"
         ]
     },
     "model": {

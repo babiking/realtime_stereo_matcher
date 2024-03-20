@@ -85,41 +85,16 @@ class Difference3DCostVolume(nn.Module):
         self.hidden_dim = hidden_dim
         self.max_disp = max_disp
 
-        self.l_kernels = self.get_conv2d_kernels(reverse=False)
-        self.r_kernels = self.get_conv2d_kernels(reverse=True)
-
-    def get_conv2d_kernels(self, reverse=True):
-        kernels = []
-        for i in range(1, self.max_disp):
-            kernel = np.zeros(shape=[self.hidden_dim, 1, 1, i + 1], dtype=np.float32)
-            kernel[:, 0, 0, (0 if reverse else -1)] = 1.0
-            kernel = torch.tensor(kernel, dtype=torch.float32)
-
-            kernels.append(kernel)
-        return kernels
-
     def forward(self, l_fmap, r_fmap):
         cost_volume = []
+
         for d in range(self.max_disp):
             if d == 0:
-                cost_volume.append((l_fmap - r_fmap).unsqueeze(2))
+                cost_item = (l_fmap - r_fmap).unsqueeze(2)
             else:
-                x = F.conv2d(
-                    l_fmap,
-                    self.l_kernels[d - 1].to(l_fmap.device),
-                    stride=1,
-                    padding=0,
-                    groups=self.hidden_dim,
-                )
-                y = F.conv2d(
-                    r_fmap,
-                    self.r_kernels[d - 1].to(r_fmap.device),
-                    stride=1,
-                    padding=0,
-                    groups=self.hidden_dim,
-                )
-
-                cost_volume.append(F.pad(x - y, [d, 0, 0, 0], value=1.0).unsqueeze(2))
+                cost_item = l_fmap[:, :, :, d:] - r_fmap[:, :, :, :-d]
+                cost_item = F.pad(cost_item, pad=(d, 0), mode="constant", value=1.0)
+            cost_volume.append(cost_item)
         cost_volume = torch.concat(cost_volume, dim=2)
         return cost_volume
 
@@ -226,7 +201,7 @@ class Warp1DOp(nn.Module):
         n, _, h, w = img.shape
 
         x = torch.arange(w, device=img.device, dtype=img.dtype)
-        x = x[None, None, None, :].repeat([n, 1, h, 1])
+        x = x[None, None, None, :].repeat([1, 1, h, 1])
         x = x - disp
 
         x = self.process_grid_coordinates(x, w)
