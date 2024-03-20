@@ -1,6 +1,6 @@
 {
-    "name": "STEREO_NET_V3_FINETUNE",
-    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/STEREO_NET_V3_FINETUNE",
+    "name": "STEREO_NET_V3_4X_FINETUNE",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/STEREO_NET_V3_4X_FINETUNE",
     "train": {
         "batch_size": 4,
         "restore_checkpoint": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/200K_STEREO_NET_V3/checkpoints/200K_STEREO_NET_V3-epoch-200000.pth.gz",
@@ -9,7 +9,7 @@
             "realsense_train"
         ],
         "learn_rate": 0.000004,
-        "num_of_steps": 10000,
+        "num_of_steps": 30000,
         "weight_decay": 0.00001,
         "loss": {
             "type": "SequenceLoss",
@@ -41,7 +41,7 @@
             ],
             "hidden_dim": 32,
             "use_groupwise_cost": false,
-            "num_groups": 8
+            "early_stop": 2
         }
     },
     "data": {

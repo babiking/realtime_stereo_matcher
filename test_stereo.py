@@ -18,12 +18,12 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/other_fast_acv_net_finetune_config.json",
+    "configure/stereo_net_config_v3.json",
     "experiment configure json file",
 )
 gflags.DEFINE_string(
     "model_chkpt_file",
-    "experiments/FAST_ACV_NET_FINETUNE_NO_WARP/checkpoints/FAST_ACV_NET_FINETUNE_NO_WARP-epoch-10000.pth.gz",
+    "experiments/STEREO_NET_V3_FINETUNE/checkpoints/STEREO_NET_V3_FINETUNE-epoch-4000.pth.gz",
     "model checkpont file",
 )
 gflags.DEFINE_string(
@@ -50,6 +50,7 @@ gflags.DEFINE_string(
     "camera intrinsic parameters",
 )
 gflags.DEFINE_boolean("use_depth_map", True, "if set, output depth map")
+gflags.DEFINE_boolean("use_restore_weights", True, "if set, restore model weights from checkpoint")
 
 autocast = torch.cuda.amp.autocast
 
@@ -118,7 +119,7 @@ def main():
     model.cuda()
     model.eval()
 
-    if "train" in exp_config:
+    if "train" in exp_config and FLAGS.use_restore_weights:
         logging.info(f"Loading checkpoint: {FLAGS.model_chkpt_file}...")
         checkpoint = torch.load(FLAGS.model_chkpt_file)
         try:
@@ -134,7 +135,7 @@ def main():
     model_name = exp_config["name"]
     model_path = exp_config["path"]
     onnx_file = os.path.join(model_path, f"{model_name}.onnx")
-    if FLAGS.use_onnx_inference and not os.path.exists(onnx_file):
+    if FLAGS.use_onnx_inference:
         export_stereo_model_to_onnx(
             model,
             onnx_file=onnx_file,
@@ -187,11 +188,11 @@ def main():
             else:
                 padder = InputPadder(
                     l_img.shape,
-                    divis_by=2 ** exp_config["model"].get("downsample_factor", 3),
+                    divis_by=2 ** exp_config["model"].get("downsample_factor", 6),
                 )
                 l_img, r_img = padder.pad(l_img, r_img)
 
-                flow_pr = model(l_img, r_img)[-1]
+                flow_pr = model(l_img, r_img, False)[-1]
 
                 flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
             end = time.time()
