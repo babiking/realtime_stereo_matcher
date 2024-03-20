@@ -219,21 +219,21 @@ class CostAggreagteHourglass3D(nn.Module):
             ),
         )
 
-        self.feature_att_8 = channelAtt(in_channels * 2, 96)
+        self.feature_att_8 = channelAtt(in_channels * 2, 64)
         self.feature_att_16 = channelAtt(in_channels * 4, 192)
-        self.feature_att_up_8 = channelAtt(in_channels * 2, 96)
+        self.feature_att_up_8 = channelAtt(in_channels * 2, 64)
 
-    def forward(self, x, imgs):
+    def forward(self, x, fmaps):
         conv1 = self.conv1(x)
-        conv1 = self.feature_att_8(conv1, imgs[1])
+        conv1 = self.feature_att_8(conv1, fmaps[1])
 
         conv2 = self.conv2(conv1)
-        conv2 = self.feature_att_16(conv2, imgs[2])
+        conv2 = self.feature_att_16(conv2, fmaps[2])
 
         conv2_up = self.conv2_up(conv2)
         conv1 = torch.cat((conv2_up, conv1), dim=1)
         conv1 = self.agg(conv1)
-        conv1 = self.feature_att_up_8(conv1, imgs[1])
+        conv1 = self.feature_att_up_8(conv1, fmaps[1])
 
         conv = self.conv1_up(conv1)
 
@@ -492,6 +492,52 @@ class CostAggregate3D(nn.Module):
         return conv3
 
 
+class ContextWeight(SubModule):
+    def __init__(self, in_dim=3, fmap_dim=64, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        self.in_dim = in_dim
+        self.fmap_dim = fmap_dim
+
+        self.stem_2x = nn.Sequential(
+            BasicConv(in_dim, 32, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(32, 32, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+        )
+        self.stem_4x = nn.Sequential(
+            BasicConv(32, 48, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(48, 48, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(48),
+            nn.ReLU(),
+        )
+
+        self.supx_1x = nn.Sequential(
+            nn.ConvTranspose2d(2 * 32, 9, kernel_size=4, stride=2, padding=1),
+        )
+        self.supx_2x = Conv2x(24, 32, True)
+        self.supx_4x = nn.Sequential(
+            BasicConv(fmap_dim + 48, 24, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(24, 24, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(24),
+            nn.ReLU(),
+        )
+
+    def forward(self, img, fmap, use_stem_only=True):
+        stem_2x = self.stem_2x(img)
+        stem_4x = self.stem_4x(stem_2x)
+
+        if use_stem_only:
+            return stem_4x
+
+        # spx_pred: used from context upsample 4x
+        supx_4x = self.supx_4x(torch.concat((fmap, stem_4x), dim=1))
+        supx_2x = self.supx_2x(supx_4x, stem_2x)
+        supx_pred = self.supx_1x(supx_2x)
+        supx_pred = F.softmax(supx_pred, dim=1)
+        return stem_4x, supx_pred
+
+
 class MobileStereoNetV9(SubModule):
     def __init__(self, max_disp, use_concat_volume, use_topk_sort, use_warp_score):
         super(MobileStereoNetV9, self).__init__()
@@ -503,56 +549,28 @@ class MobileStereoNetV9(SubModule):
         self.gamma = nn.Parameter(torch.zeros(1))
         self.beta = nn.Parameter(2 * torch.ones(1))
 
-        self.stem_2 = nn.Sequential(
-            BasicConv(3, 32, kernel_size=3, stride=2, padding=1),
-            nn.Conv2d(32, 32, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-        )
-        self.stem_4 = nn.Sequential(
-            BasicConv(32, 48, kernel_size=3, stride=2, padding=1),
-            nn.Conv2d(48, 48, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(48),
-            nn.ReLU(),
-        )
+        self.context = ContextWeight(in_dim=3, fmap_dim=48)
 
-        self.stem_8 = nn.Sequential(
-            BasicConv(48, 48, kernel_size=3, stride=2, padding=1),
-            nn.Conv2d(48, 32, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-        )
-
-        self.spx = nn.Sequential(
-            nn.ConvTranspose2d(2 * 32, 9, kernel_size=4, stride=2, padding=1),
-        )
-        self.spx_2 = Conv2x(24, 32, True)
-        self.spx_4 = nn.Sequential(
-            BasicConv(96, 24, kernel_size=3, stride=1, padding=1),
-            nn.Conv2d(24, 24, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(24),
-            nn.ReLU(),
-        )
-
-        self.corr_feature_att_8 = channelAtt(12, 96)
+        self.corr_feature_att_8 = channelAtt(8, 64)
 
         if self.use_concat_volume:
             self.concat_feature = nn.Sequential(
-                BasicConv(96, 32, kernel_size=3, stride=1, padding=1),
+                BasicConv(48, 32, kernel_size=3, stride=1, padding=1),
                 nn.Conv2d(32, 16, 3, 1, 1, bias=False),
             )
-            self.concat_feature_att_4 = channelAtt(16, 96)
+            self.concat_feature_att_4 = channelAtt(16, 48)
             self.concat_aggregate = CostAggreagteHourglass3D(16)
             self.concat_stem = BasicConv(
                 32, 16, is_3d=True, kernel_size=3, stride=1, padding=1
             )
 
-        self.cost_aggregate = CostAggregate3D(in_dim=12, fmap_dim=96)
+        self.cost_aggregate = CostAggregate3D(in_dim=8, fmap_dim=64)
+        self.cost_patch = BasicConv(24, 48, kernel_size=1, stride=1, padding=0)
         self.propagation = Propagation()
         self.propagation_prob = Propagation_prob()
 
         self.cost_builder = GroupwiseCostVolume3D(
-            hidden_dim=96, max_disp=max_disp // 8, num_cost_groups=12
+            hidden_dim=64, max_disp=max_disp // 8, num_cost_groups=8
         )
 
         self.weight_init()
@@ -569,44 +587,28 @@ class MobileStereoNetV9(SubModule):
     def forward(self, left, right, is_train=True):
         features_left = self.feature(left)
         features_right = self.feature(right)
+        # [x4, x8, x16, x32] -> [48, 64, 192, 160]
         features_left, features_right = self.feature_up(features_left, features_right)
 
-        stem_2x = self.stem_2(left)
-        stem_4x = self.stem_4(stem_2x)
-        stem_8x = self.stem_8(stem_4x)
+        stem_4x, supx_pred = self.context(left, features_left[0], use_stem_only=False)
+        stem_4y = self.context(right, None, use_stem_only=True)
 
-        stem_2y = self.stem_2(right)
-        stem_4y = self.stem_4(stem_2y)
-        stem_8y = self.stem_8(stem_4y)
-
-        features_left[0] = torch.cat((features_left[0], stem_4x), 1)
-        features_right[0] = torch.cat((features_right[0], stem_4y), 1)
-
-        features_left[1] = torch.cat((features_left[1], stem_8x), 1)
-        features_right[1] = torch.cat((features_right[1], stem_8y), 1)
-
-        # spx_pred: used from context upsample 4x
-        xspx = self.spx_4(features_left[0])
-        xspx = self.spx_2(xspx, stem_2x)
-        spx_pred = self.spx(xspx)
-        spx_pred = F.softmax(spx_pred, 1)
-
-        # cost_volume_8x: 1 x 12 x 24 x 64 x 80, 8x
+        # cost_volume_8x: 1 x 8 x 24 x 64 x 80, 8x
         cost_volume_8x = self.cost_builder(
             features_left[1], features_right[1], use_naive=is_train
         )
 
-        # cost_volume_8x: 1 x 12 x 24 x 64 x 80, 8x, left image feature guided attention weights
+        # cost_volume_8x: 1 x 8 x 24 x 64 x 80, 8x, left image feature guided attention weights
         cost_volume_8x = self.corr_feature_att_8(cost_volume_8x, features_left[1])
         # cost_weights_8x: 1 x 1 x 24 x 64 x 80, 8x, left image features guided hourglass filtering
         cost_weights_8x = self.cost_aggregate(cost_volume_8x, features_left[1])
+        cost_weights_8x = cost_weights_8x.squeeze(1)
 
         # cost_weights_4x: 1 x 1 x 48 x 120 x 240, 4x, cost volume, V_init
         cost_weights_4x = F.interpolate(
-            cost_weights_8x,
-            [self.max_disp // 4, left.shape[2] // 4, left.shape[3] // 4],
-            mode="trilinear",
-        ).squeeze(1)
+            cost_weights_8x, [left.shape[2] // 4, left.shape[3] // 4], mode="bilinear"
+        )
+        cost_weights_4x = self.cost_patch(cost_weights_4x)
 
         # disp_probs_4x: 1 x 48 x 120 x 160, D_init
         disp_probs_4x = F.softmax(cost_weights_4x, dim=1)
@@ -633,7 +635,7 @@ class MobileStereoNetV9(SubModule):
             disp_match_4x = 1.0
 
         # disp_match_4x: 1 x 5 x 120 x 160, cross shape propagation weights, W_m_i
-        disp_match_4x = torch.softmax(disp_match_4x * disp_var_4x, dim=1)
+        disp_match_4x = F.normalize(disp_match_4x * disp_var_4x, p=2.0, dim=1)
 
         # cost_weights_4x: 1 x 5 x 48 x 120 x 160, cost volume after VAP, V_p_i_d
         cost_weights_4x = self.propagation_prob(cost_weights_4x.unsqueeze(1))
@@ -691,7 +693,7 @@ class MobileStereoNetV9(SubModule):
             l_disp_cost_4x = disparity_regression(
                 disp_probs_4x, maxdisp=self.max_disp // 4
             )
-        l_disp_cost_up = context_upsample(l_disp_cost_4x, spx_pred) * 4.0
+        l_disp_cost_up = context_upsample(l_disp_cost_4x, supx_pred) * 4.0
 
         if self.use_concat_volume:
             if self.use_topk_sort:
@@ -702,7 +704,7 @@ class MobileStereoNetV9(SubModule):
                 l_disp_seman_4x = disparity_regression(
                     torch.softmax(seman_weights_4x, dim=1), maxdisp=self.max_disp // 4
                 )
-            l_disp_seman_up = context_upsample(l_disp_seman_4x, spx_pred) * 4.0
+            l_disp_seman_up = context_upsample(l_disp_seman_4x, supx_pred) * 4.0
 
         if self.training:
             if self.use_concat_volume:
