@@ -4,24 +4,25 @@
     "train": {
         "batch_size": 4,
         "restore_checkpoint": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/200K_STEREO_NET_V3/checkpoints/200K_STEREO_NET_V3-epoch-200000.pth.gz",
-        "save_checkpoint_frequency": 1000,
+        "save_checkpoint_frequency": 10000,
         "datasets": [
-            "middlebury_2014",
+            "middlebury_Q",
             "eth3d",
             "sceneflow/things",
-            "sceneflow/driving",
-            "kitti"
+            "realsense_train"
         ],
-        "learn_rate": 0.000004,
-        "num_of_steps": 80000,
+        "learn_rate": 0.00004,
+        "num_of_steps": 100000,
         "weight_decay": 0.00001,
-        "loss": {
-            "type": "SequenceLoss",
-            "parameters": {
-                "loss_gamma": 0.9,
-                "max_flow_magnitude": 700
+        "loss": [
+            {
+                "type": "SequenceLoss",
+                "parameters": {
+                    "loss_gamma": 0.9,
+                    "max_flow_magnitude": 700
+                }
             }
-        }
+        ]
     },
     "test": {
         "datasets": [
