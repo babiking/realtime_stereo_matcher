@@ -1,0 +1,87 @@
+{
+    "name": "200K_STEREO_NET_V3_MINUS",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/200K_STEREO_NET_V3_MINUS",
+    "train": {
+        "batch_size": 8,
+        "restore_checkpoint": "",
+        "save_checkpoint_frequency": 10000,
+        "datasets": [
+            "middlebury_2014",
+            "eth3d",
+            "sceneflow/things",
+            "sceneflow/driving",
+            "kitti"
+        ],
+        "learn_rate": 0.0002,
+        "num_of_steps": 200000,
+        "weight_decay": 0.00001,
+        "loss": [
+            {
+                "type": "SequenceLoss",
+                "parameters": {
+                    "loss_gamma": 0.9,
+                    "max_flow_magnitude": 700
+                }
+            }
+        ]
+    },
+    "test": {
+        "datasets": [
+            "realsense_test",
+            "middlebury_Q",
+            "kitti"
+        ]
+    },
+    "model": {
+        "type": "MobileStereoNetV3Minus",
+        "parameters": {
+            "max_disp": 192,
+            "extract_dims": [
+                32,
+                32,
+                32,
+                32
+            ],
+            "cost_dims": [
+                32,
+                32,
+                32,
+                32
+            ],
+            "refine_dim": 32,
+            "refine_dilates": [
+                1,
+                2,
+                4,
+                8,
+                1,
+                1
+            ],
+            "use_warp_feature": true,
+            "use_context_upsample": false,
+            "context_dims": [
+                24,
+                32
+            ],
+            "unfold_radius": 3,
+            "early_stop": 0
+        }
+    },
+    "data": {
+        "image_size": [
+            240,
+            320
+        ],
+        "image_gamma": [],
+        "spatial_scale": [
+            -0.2,
+            0.4
+        ],
+        "saturation_range": [
+            0,
+            1.4
+        ],
+        "do_flip": false,
+        "no_y_jitter": false
+    }
+}

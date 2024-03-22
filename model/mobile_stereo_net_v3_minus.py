@@ -399,7 +399,8 @@ class ContextWeight(nn.Module):
         supx_pred = self.supx_1x(supx_2x)
         supx_pred = F.softmax(supx_pred, dim=1)
 
-        disp_up = F.unfold(disp_init, self.unfold_radius, 1, 1)
+        n, _, h, w = disp_init.shape
+        disp_up = F.unfold(disp_init, self.unfold_radius, 1, 1).view([n, 9, h, w])
         disp_up = torch.sum(disp_up * supx_pred, dim=1, keepdim=True)
         return disp_up
 
@@ -416,7 +417,7 @@ class MobileStereoNetV3Minus(nn.Module):
         use_context_upsample=False,
         context_dims=[24, 32],
         unfold_radius=3,
-        early_stop=2,
+        early_stop=0,
     ):
         super().__init__()
 
@@ -534,13 +535,13 @@ class MobileStereoNetV3Minus(nn.Module):
                 )
                 * scale
             )
+            multi_scale.append(disp_final)
 
             if self.use_context_upsample:
                 disp_final = self.context_upsampler(
                     l_img, l_fmaps[2 - self.down_factor], disp_final
                 )
-
-            multi_scale.append(disp_final)
+                multi_scale.append(disp_final)
 
         if is_train:
             return multi_scale, [None] * len(multi_scale), [None] * len(multi_scale)

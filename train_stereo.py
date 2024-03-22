@@ -24,11 +24,11 @@ import gflags
 
 gflags.DEFINE_string(
     "exp_config_json",
-    "configure/stereo_net_config_v9.json",
+    "configure/stereo_net_config_v3_minus.json",
     "experiment configure json file",
 )
 gflags.DEFINE_boolean(
-    "use_init_weights", False, "if set, initialize weights with normal distribution"
+    "use_init_weights", True, "if set, initialize weights with normal distribution"
 )
 
 
@@ -167,9 +167,9 @@ def train(exp_config, use_init_weights):
         )
         logging.info(f"Model loading checkpoint from {restore_ckpt}...")
         try:
-            model.load_state_dict(torch.load(restore_ckpt), strict=True)
+            model.load_state_dict(torch.load(restore_ckpt), strict=False)
         except:
-            model.load_state_dict(torch.load(restore_ckpt)["model"], strict=True)
+            model.load_state_dict(torch.load(restore_ckpt)["model"], strict=False)
         logging.info(f"Done loading checkpoint.")
 
     scaler = GradScaler(enabled=exp_config["model"].get("mixed_precision", True))
