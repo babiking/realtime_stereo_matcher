@@ -413,6 +413,7 @@ class MobileStereoNetV3Minus(nn.Module):
         cost_dims=[32, 32, 32, 32],
         refine_dim=32,
         refine_dilates=[1, 2, 4, 8, 1, 1],
+        use_cost_excite=False,
         use_warp_feature=True,
         use_context_upsample=False,
         context_dims=[24, 32],
@@ -435,6 +436,7 @@ class MobileStereoNetV3Minus(nn.Module):
         self.refine_dilates = refine_dilates
 
         self.use_warp_feature = use_warp_feature
+        self.use_cost_excite = use_cost_excite
         self.use_context_upsample = use_context_upsample
 
         self.feature_extractor = UNetFeatureExtractor(
@@ -444,11 +446,12 @@ class MobileStereoNetV3Minus(nn.Module):
             hidden_dim=extract_dims[-1], max_disp=self.max_disp
         )
 
-        self.cost_excitator = CostExcitator(
-            cost_dim=extract_dims[-1],
-            hidden_dim=extract_dims[-1] // 2,
-            fmap_dim=extract_dims[-1],
-        )
+        if use_cost_excite:
+            self.cost_excitator = CostExcitator(
+                cost_dim=extract_dims[-1],
+                hidden_dim=extract_dims[-1] // 2,
+                fmap_dim=extract_dims[-1],
+            )
 
         cost_filter = nn.ModuleList(
             [
@@ -504,7 +507,8 @@ class MobileStereoNetV3Minus(nn.Module):
         # cost_volume: 1 x 32 x 24 x 60 x 80
         cost_volume = self.cost_builder(l_fmaps[0], r_fmaps[0])
 
-        cost_volume = self.cost_excitator(cost_volume, l_fmaps[0])
+        if self.use_cost_excite:
+            cost_volume = self.cost_excitator(cost_volume, l_fmaps[0])
 
         # cost_volume: 1 x 24 x 60 x 80
         cost_volume = self.cost_filter(cost_volume).squeeze(1)

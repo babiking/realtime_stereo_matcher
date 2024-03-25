@@ -58,6 +58,7 @@
                 1
             ],
             "use_warp_feature": true,
+            "use_cost_excite": false,
             "use_context_upsample": false,
             "context_dims": [
                 24,

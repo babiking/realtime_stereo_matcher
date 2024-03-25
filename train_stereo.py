@@ -188,7 +188,7 @@ def train(exp_config, use_init_weights):
 
             n, c, src_h, src_w = image1.shape
 
-            align = 2**5
+            align = 2**3
             w_pad = (align - (src_w % align)) % align
             h_pad = (align - (src_h % align)) % align
 
