@@ -70,8 +70,8 @@
     },
     "data": {
         "image_size": [
-            480,
-            640
+            240,
+            320
         ],
         "image_gamma": [],
         "spatial_scale": [
