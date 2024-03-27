@@ -15,6 +15,7 @@ from others.mobile_disp_net_c.mobile_disp_net_c import MobileDispNetC
 from others.mobile_disp_net_c.fast_disp_net_c import FastDispNetC
 from others.mobile_disp_net_c.fast_disp_net_s import FastDispNetS
 from others.fast_mad_net.fast_mad_net import FastMADNet
+from others.fast_fad_net.FADNet import FADNet
 
 
 def build_model(model_config):
@@ -51,6 +52,8 @@ def build_model(model_config):
     elif model_config["type"] == "FastDispNetS":
         return FastDispNetS(**model_config["parameters"])
     elif model_config["type"] == "FastMADNet":
+        return FastMADNet(**model_config["parameters"])
+    elif model_config["type"] == "FastFADNet":
         return FastMADNet(**model_config["parameters"])
     else:
         raise NotImplementedError("unsupport model: {}".format(model_config["type"]))
