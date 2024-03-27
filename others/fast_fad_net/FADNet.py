@@ -73,9 +73,7 @@ class FADNet(nn.Module):
         return img
 
     def forward(self, img_left, img_right, is_train=False):
-        inputs = torch.concat(
-            (self.load_data_item(img_left), self.load_data_item(img_right)), dim=1
-        )
+        inputs = torch.concat((img_left, img_right), dim=1)
 
         # extract features
         conv1_l, conv2_l, conv3a_l, conv3a_r = self.extract_network(inputs)
@@ -106,9 +104,18 @@ class FADNet(nn.Module):
         dispnetres_final_flow = dispnetres_flows[index]
 
         if self.training and is_train:
-            return dispnetc_flows, dispnetres_flows
+            l_disps = (
+                dispnetc_flows
+                if self.use_dispnetc_only
+                else (dispnetc_flows + dispnetres_flows)
+            )
+            return l_disps, [None] * len(l_disps), [None] * len(l_disps)
         else:
-            return dispnetc_final_flow, dispnetres_final_flow
+            return (
+                [dispnetc_final_flow]
+                if self.use_dispnetc_only
+                else [dispnetres_final_flow]
+            )
 
     def weight_parameters(self):
         return [param for name, param in self.named_parameters() if "weight" in name]
