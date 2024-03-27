@@ -1,0 +1,84 @@
+{
+    "name": "200K_STEREO_NET_V3_MINUS_CUT_FINETUNE",
+    "path": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/200K_STEREO_NET_V3_MINUS_CUT_FINETUNE",
+    "train": {
+        "batch_size": 4,
+        "restore_checkpoint": "/mnt/data/workspace/github/realtime_stereo_matcher/experiments/200K_STEREO_NET_V3_MINUS_CUT/checkpoints/200K_STEREO_NET_V3_MINUS_CUT-epoch-100000.pth.gz",
+        "save_checkpoint_frequency": 1000,
+        "datasets": [
+            "realsense_train"
+        ],
+        "learn_rate": 0.000004,
+        "num_of_steps": 5000,
+        "weight_decay": 0.00001,
+        "loss": [
+            {
+                "type": "SequenceLoss",
+                "parameters": {
+                    "loss_gamma": 0.9,
+                    "max_flow_magnitude": 700
+                }
+            }
+        ]
+    },
+    "test": {
+        "datasets": [
+            "realsense_test",
+            "middlebury_Q",
+            "kitti"
+        ]
+    },
+    "model": {
+        "type": "MobileStereoNetV3Minus",
+        "parameters": {
+            "max_disp": 192,
+            "extract_dims": [
+                32,
+                32,
+                32,
+                32
+            ],
+            "cost_dims": [
+                32,
+                32,
+                32,
+                32
+            ],
+            "refine_dim": 32,
+            "refine_dilates": [
+                1,
+                2,
+                4,
+                8,
+                1,
+                1
+            ],
+            "use_warp_feature": true,
+            "use_cost_excite": false,
+            "use_context_upsample": true,
+            "context_dims": [
+                24,
+                32
+            ],
+            "unfold_radius": 3,
+            "early_stop": 2
+        }
+    },
+    "data": {
+        "image_size": [
+            480,
+            640
+        ],
+        "image_gamma": [],
+        "spatial_scale": [
+            -0.2,
+            0.4
+        ],
+        "saturation_range": [
+            0,
+            1.4
+        ],
+        "do_flip": false,
+        "no_y_jitter": false
+    }
+}
