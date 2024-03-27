@@ -1,6 +1,7 @@
 import os
 import copy
 import math
+import cv2 as cv
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.spatial.transform import Rotation as R
@@ -35,7 +36,7 @@ class BezierCurve3D:
         return np.array(result, dtype=np.float32)
 
 
-def draw_multi_world_lanes(lanes, is_3d=True, save_file=None):
+def draw_multi_world_lanes(lanes, is_3d=True, revert=False, save_file=None):
     fig = plt.figure()
     ax = fig.add_subplot(111, projection="3d") if is_3d else fig.add_subplot(111)
 
@@ -49,11 +50,13 @@ def draw_multi_world_lanes(lanes, is_3d=True, save_file=None):
     ax.set_ylabel("Y")
     if is_3d:
         ax.set_zlabel("Z")
-    ax.set_title(
-        ("3D" if is_3d else "2D") + " Bezier curves for multiple lanes"
-    )
+    ax.set_title(("3D" if is_3d else "2D") + " Bezier curves for multiple lanes")
     ax.grid(True)
     ax.legend()
+
+    if revert:
+        # ax.invert_xaxis()
+        ax.invert_yaxis()
 
     if save_file is None:
         plt.show()
@@ -87,6 +90,8 @@ def get_projection_from_camera(cam_params):
 
 
 def main():
+    np.random.seed(2)
+
     work_path = os.path.dirname(os.path.abspath(__file__))
 
     Camera = namedtuple("Camera", ["fx", "fy", "cx", "cy", "width", "height"])
@@ -95,7 +100,7 @@ def main():
 
     # 480P medium-focal-length camera
     cam_params = Camera(
-        fx=390.00, fy=390.00, cx=320.00, cy=240.00, width=640, height=480
+        fx=390.00, fy=390.00, cx=640.00, cy=360.00, width=1280, height=720
     )
     # camera located at (0m, 0m, 2.26m) with tiny euler angle offsets
     base_pose = Pose(roll=0.0, pitch=0.0, yaw=0.0, x=0, y=0, z=2.26)
@@ -128,25 +133,17 @@ def main():
         world_lanes[i][:, 1] -= view_y
 
     draw_multi_world_lanes(
-        world_lanes, True, os.path.join(work_path, "result", "bezier_lanes_3d.png")
+        world_lanes,
+        True,
+        False,
+        os.path.join(work_path, "result", "bezier_lanes_3d.png"),
     )
     draw_multi_world_lanes(
-        world_lanes, False, os.path.join(work_path, "result", "bezier_lanes_2d.png")
+        world_lanes,
+        False,
+        False,
+        os.path.join(work_path, "result", "bezier_lanes_2d.png"),
     )
-
-    yaw_noise, pitch_noise, roll_noise = np.random.random(size=[3]) * 3.0
-    base_pose_noised = Pose(
-        roll=base_pose.roll + roll_noise,
-        pitch=base_pose.pitch + pitch_noise,
-        yaw=base_pose.yaw + yaw_noise,
-        x=base_pose.x,
-        y=base_pose.y,
-        z=base_pose.z,
-    )
-    tf_base_world = get_transform_from_pose(base_pose_noised)
-    tf_world_base = np.linalg.inv(tf_base_world)
-
-    # identity = tf_cam_world @ tf_world_cam
 
     # base-link: X-forward, Y-left, Z-up
     # camera-link: X-right, Y-down, Z-forward
@@ -160,22 +157,67 @@ def main():
         dtype=np.float32,
     )
 
-    tf_world_cam = tf_base_cam @ tf_world_base
+    tf_base_world = get_transform_from_pose(base_pose)
+    tf_world_cam = tf_base_cam @ np.linalg.inv(tf_base_world)
+
+    yaw_noise, pitch_noise, roll_noise = np.random.random(size=[3]) * 6.0
+    noise_pose = Pose(
+        roll=roll_noise, pitch=pitch_noise, yaw=yaw_noise, x=0.0, y=0.0, z=0.0
+    )
+    tf_noise_base = get_transform_from_pose(noise_pose)
+    tf_noise_world = tf_noise_base @ tf_base_world
+    tf_world_noise = tf_base_cam @ np.linalg.inv(tf_noise_world)
 
     cam_proj = get_projection_from_camera(cam_params)
 
-    cam_lanes = []
-    for lane in world_lanes:
-        cam_lane_3d = tf_world_cam[:3, :3] @ lane.T + tf_world_cam[:3, 3][:, np.newaxis]
-        
-        cam_lane_3d = cam_lane_3d[:, :] / cam_lane_3d[np.newaxis, 2, :]
+    h_mat = np.eye(3, dtype=np.float32)
+    h_mat[:3, :2] = tf_world_cam[:3, :2]
+    h_mat[:3, 2] = tf_world_cam[:3, 3]
+    h_mat = cam_proj @ h_mat
+    h_mat = np.linalg.inv(h_mat)
 
-        cam_lane_2d = (cam_proj @ cam_lane_3d).T
-        cam_lane_2d = cam_lane_2d[:, :2]
-        cam_lanes.append(cam_lane_2d)
-    
+    cam_pixs = []
+    cam_reprojs = []
+    cam_reprojs_denoised = []
+    for lane in world_lanes:
+        lane[:, 2] = 0.0
+
+        lane = np.concatenate(
+            (lane, np.ones([lane.shape[0], 1], dtype=np.float32)), axis=1
+        )
+        cam_lane_3d = (lane @ tf_world_noise.T)[:, :3]
+        cam_lane_2d = cam_lane_3d @ cam_proj.T
+        cam_lane_2d /= cam_lane_2d[:, 2:3]
+        cam_pixs.append(cam_lane_2d)
+
+        cam_reproj = cam_lane_2d @ h_mat.T
+        cam_reproj /= cam_reproj[:, 2:3]
+        cam_reprojs.append(cam_reproj)
+
+        h_mat_noise, status = cv.findHomography(
+            srcPoints=cam_lane_2d[:, :2], dstPoints=lane[:, :2]
+        )
+        cam_reproj_denoise = cam_lane_2d @ h_mat_noise.T
+        cam_reproj_denoise /= cam_reproj_denoise[:, 2:3]
+        cam_reprojs_denoised.append(cam_reproj_denoise)
+
     draw_multi_world_lanes(
-        cam_lanes, False, os.path.join(work_path, "result", "camera_lanes_2d.png")
+        cam_pixs,
+        False,
+        True,
+        os.path.join(work_path, "result", "camera_pixels_2d.png"),
+    )
+    draw_multi_world_lanes(
+        cam_reprojs,
+        False,
+        False,
+        os.path.join(work_path, "result", "camera_reprojections_2d.png"),
+    )
+    draw_multi_world_lanes(
+        cam_reprojs_denoised,
+        False,
+        False,
+        os.path.join(work_path, "result", "camera_reprojections_denoised_2d.png"),
     )
 
 
