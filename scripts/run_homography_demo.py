@@ -3,6 +3,7 @@ import copy
 import math
 import numpy as np
 from matplotlib import pyplot as plt
+from scipy.spatial.transform import Rotation as R
 from collections import namedtuple
 
 
@@ -49,7 +50,7 @@ def draw_multi_world_lanes(lanes, is_3d=True, save_file=None):
     if is_3d:
         ax.set_zlabel("Z")
     ax.set_title(
-        ("3D" if is_3d else "2D Bird-Eye") + " Bezier curves for multiple lanes"
+        ("3D" if is_3d else "2D") + " Bezier curves for multiple lanes"
     )
     ax.grid(True)
     ax.legend()
@@ -59,6 +60,30 @@ def draw_multi_world_lanes(lanes, is_3d=True, save_file=None):
     else:
         os.makedirs(os.path.dirname(save_file), exist_ok=True)
         plt.savefig(save_file)
+
+
+def get_transform_from_pose(pose):
+    rot_mat = R.from_euler(
+        "ZYX", [pose.yaw, pose.pitch, pose.roll], degrees=True
+    ).as_matrix()
+
+    t_vec = np.array([pose.x, pose.y, pose.z], dtype=np.float32)
+
+    tf_mat = np.eye(4, dtype=np.float32)
+    tf_mat[:3, :3] = rot_mat
+    tf_mat[:3, 3] = t_vec
+    return tf_mat
+
+
+def get_projection_from_camera(cam_params):
+    return np.array(
+        [
+            [cam_params.fx, 0.0, cam_params.cx],
+            [0.0, cam_params.fy, cam_params.cy],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
 
 
 def main():
@@ -73,7 +98,7 @@ def main():
         fx=390.00, fy=390.00, cx=320.00, cy=240.00, width=640, height=480
     )
     # camera located at (0m, 0m, 2.26m) with tiny euler angle offsets
-    cam_pose = Pose(roll=0.5, pitch=2.0, yaw=1.0, x=0, y=0, z=2.26)
+    base_pose = Pose(roll=0.0, pitch=0.0, yaw=0.0, x=0, y=0, z=2.26)
 
     xmin = 1.0
     xmax = 30.0
@@ -107,6 +132,50 @@ def main():
     )
     draw_multi_world_lanes(
         world_lanes, False, os.path.join(work_path, "result", "bezier_lanes_2d.png")
+    )
+
+    yaw_noise, pitch_noise, roll_noise = np.random.random(size=[3]) * 3.0
+    base_pose_noised = Pose(
+        roll=base_pose.roll + roll_noise,
+        pitch=base_pose.pitch + pitch_noise,
+        yaw=base_pose.yaw + yaw_noise,
+        x=base_pose.x,
+        y=base_pose.y,
+        z=base_pose.z,
+    )
+    tf_base_world = get_transform_from_pose(base_pose_noised)
+    tf_world_base = np.linalg.inv(tf_base_world)
+
+    # identity = tf_cam_world @ tf_world_cam
+
+    # base-link: X-forward, Y-left, Z-up
+    # camera-link: X-right, Y-down, Z-forward
+    tf_base_cam = np.array(
+        [
+            [0.0, -1.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+
+    tf_world_cam = tf_base_cam @ tf_world_base
+
+    cam_proj = get_projection_from_camera(cam_params)
+
+    cam_lanes = []
+    for lane in world_lanes:
+        cam_lane_3d = tf_world_cam[:3, :3] @ lane.T + tf_world_cam[:3, 3][:, np.newaxis]
+        
+        cam_lane_3d = cam_lane_3d[:, :] / cam_lane_3d[np.newaxis, 2, :]
+
+        cam_lane_2d = (cam_proj @ cam_lane_3d).T
+        cam_lane_2d = cam_lane_2d[:, :2]
+        cam_lanes.append(cam_lane_2d)
+    
+    draw_multi_world_lanes(
+        cam_lanes, False, os.path.join(work_path, "result", "camera_lanes_2d.png")
     )
 
 
