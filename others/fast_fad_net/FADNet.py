@@ -100,9 +100,15 @@ class FADNet(nn.Module):
 
         if self.training and is_train:
             l_disps = (
-                dispnetc_flows
+                [
+                    dispnetc_flows[len(dispnetc_flows) - 1 - i]
+                    for i in range(len(dispnetc_flows))
+                ]
                 if self.use_dispnetc_only
-                else (dispnetc_flows + dispnetres_flows)
+                else [
+                    dispnetres_flows[len(dispnetres_flows) - 1 - i]
+                    for i in range(len(dispnetres_flows))
+                ]
             )
             return l_disps, [None] * len(l_disps), [None] * len(l_disps)
         else:

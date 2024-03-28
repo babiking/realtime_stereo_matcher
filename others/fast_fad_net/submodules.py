@@ -631,7 +631,7 @@ def warp_right_to_left(x, disp, warp_grid=None):
     # vgrid[:,0,:,:] = 2.0*vgrid[:,0,:,:] / max(W-1,1)-1.0
     # vgrid[:,1,:,:] = 2.0*vgrid[:,1,:,:] / max(H-1,1)-1.0
     vgrid = vgrid.permute(0, 2, 3, 1)
-    output = nn.functional.grid_sample(x, vgrid)
+    output = nn.functional.grid_sample(x, vgrid, align_corners=True)
     # mask = torch.autograd.Variable(torch.ones_like(x))
     # mask = nn.functional.grid_sample(mask, vgrid)
 
