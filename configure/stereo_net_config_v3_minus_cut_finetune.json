@@ -9,7 +9,7 @@
             "realsense_train"
         ],
         "learn_rate": 0.000004,
-        "num_of_steps": 5000,
+        "num_of_steps": 10000,
         "weight_decay": 0.00001,
         "loss": [
             {
