@@ -54,6 +54,6 @@ def build_model(model_config):
     elif model_config["type"] == "FastMADNet":
         return FastMADNet(**model_config["parameters"])
     elif model_config["type"] == "FastFADNet":
-        return FastMADNet(**model_config["parameters"])
+        return FADNet(**model_config["parameters"])
     else:
         raise NotImplementedError("unsupport model: {}".format(model_config["type"]))

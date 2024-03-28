@@ -34,7 +34,14 @@
     },
     "model": {
         "type": "FastFADNet",
-        "parameters": {}
+        "parameters": {
+            "resBlock": true,
+            "maxdisp": 192,
+            "input_channel": 3,
+            "encoder_ratio": 16,
+            "decoder_ratio": 16,
+            "use_dispnetc_only": false
+        }
     },
     "data": {
         "image_size": [
